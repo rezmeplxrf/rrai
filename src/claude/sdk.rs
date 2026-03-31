@@ -415,7 +415,8 @@ mod tests {
 
     #[test]
     fn parse_system_with_extra_fields() {
-        let json = r#"{"type":"system","subtype":"init","session_id":"s1","tools":["Bash","Read"]}"#;
+        let json =
+            r#"{"type":"system","subtype":"init","session_id":"s1","tools":["Bash","Read"]}"#;
         let msg: SdkMessage = serde_json::from_str(json).unwrap();
         match msg {
             SdkMessage::System { extra, .. } => {

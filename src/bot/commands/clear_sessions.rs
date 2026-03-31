@@ -1,10 +1,11 @@
-use super::{reply, BotData};
+use super::{BotData, reply};
 use crate::bot::handlers::interaction::find_session_dir;
 use serenity::all::*;
 use std::sync::Arc;
 
 pub fn register() -> CreateCommand {
-    CreateCommand::new("clear").description("Delete all session files and messages for this project")
+    CreateCommand::new("clear")
+        .description("Delete all session files and messages for this project")
 }
 
 pub async fn run(
@@ -104,7 +105,10 @@ async fn bulk_delete_channel_messages(
 
         let batch_count = message_ids.len();
         let delete_ok = if batch_count == 1 {
-            channel_id.delete_message(&ctx.http, message_ids[0]).await.is_ok()
+            channel_id
+                .delete_message(&ctx.http, message_ids[0])
+                .await
+                .is_ok()
         } else {
             channel_id
                 .delete_messages(&ctx.http, &message_ids)

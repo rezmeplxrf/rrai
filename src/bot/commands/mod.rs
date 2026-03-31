@@ -66,11 +66,7 @@ pub async fn handle_command(
     }
 }
 
-pub async fn handle_autocomplete(
-    ctx: &Context,
-    auto: &CommandInteraction,
-    data: &Arc<BotData>,
-) {
+pub async fn handle_autocomplete(ctx: &Context, auto: &CommandInteraction, data: &Arc<BotData>) {
     if auto.data.name.as_str() == "mcp" {
         mcp::autocomplete(ctx, auto, data).await;
     }

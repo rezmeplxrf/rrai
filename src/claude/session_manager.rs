@@ -1,8 +1,8 @@
 use crate::claude::output_formatter::*;
 use crate::claude::sdk::{ClaudeProcess, ContentBlock, SdkMessage};
 use crate::config::get_config;
-use crate::db::types::SessionStatus;
 use crate::db::Database;
+use crate::db::types::SessionStatus;
 use crate::discord::DiscordClient;
 use parking_lot::Mutex;
 use serenity::all::{
@@ -12,14 +12,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::{error, warn};
 use uuid::Uuid;
-
-const EDIT_INTERVAL_MS: u128 = 1500;
-const APPROVAL_TIMEOUT_SECS: u64 = 300; // 5 minutes
-const MAX_QUEUE_SIZE: usize = 5;
-const SDK_CALL_TIMEOUT_SECS: u64 = 15;
 
 type ApprovalDecision = (String, Option<String>, Option<serde_json::Value>);
 // (behavior, message, updated_input)
@@ -56,10 +51,35 @@ pub struct SessionManager {
     pending_custom_inputs: Arc<Mutex<HashMap<String, String>>>, // channel_id -> request_id
     message_queues: Arc<Mutex<HashMap<String, Vec<QueueItem>>>>,
     pending_queue_prompts: Arc<Mutex<HashMap<String, QueueItem>>>,
+    // Operational tuning (set from config at construction time)
+    edit_interval_ms: u128,
+    approval_timeout_secs: u64,
+    max_queue_size: usize,
+    sdk_call_timeout_secs: u64,
 }
 
 impl SessionManager {
     pub fn new(db: Database, discord: Arc<dyn DiscordClient>) -> Arc<Self> {
+        let config = get_config();
+        Self::new_with_settings(
+            db,
+            discord,
+            config.edit_interval_ms,
+            config.approval_timeout_secs,
+            config.max_queue_size,
+            config.sdk_call_timeout_secs,
+        )
+    }
+
+    /// Constructor with explicit settings (useful for tests without global config).
+    pub fn new_with_settings(
+        db: Database,
+        discord: Arc<dyn DiscordClient>,
+        edit_interval_ms: u128,
+        approval_timeout_secs: u64,
+        max_queue_size: usize,
+        sdk_call_timeout_secs: u64,
+    ) -> Arc<Self> {
         Arc::new(Self {
             db,
             discord,
@@ -69,6 +89,10 @@ impl SessionManager {
             pending_custom_inputs: Arc::new(Mutex::new(HashMap::new())),
             message_queues: Arc::new(Mutex::new(HashMap::new())),
             pending_queue_prompts: Arc::new(Mutex::new(HashMap::new())),
+            edit_interval_ms,
+            approval_timeout_secs,
+            max_queue_size,
+            sdk_call_timeout_secs,
         })
     }
 
@@ -80,88 +104,221 @@ impl SessionManager {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
         let prompt = prompt.to_string();
         Box::pin(async move {
-        let prompt = &prompt;
-        let channel_id_str = channel_id.to_string();
-        let config = get_config();
+            let prompt = &prompt;
+            let channel_id_str = channel_id.to_string();
+            let config = get_config();
 
-        // Auto-register channel if not registered
-        let project = match self.db.get_project(&channel_id_str) {
-            Some(p) => p,
-            None => {
-                let project_path =
-                    config.sessions_dir().join(&channel_id_str);
-                std::fs::create_dir_all(&project_path).ok();
-                if let Err(e) = self.db.register_project(
-                    &channel_id_str,
-                    &project_path.to_string_lossy(),
-                    &guild_id.to_string(),
-                ) {
-                    warn!("Failed to register project: {e}");
-                }
-                self.db.get_project(&channel_id_str).unwrap()
-            }
-        };
-
-        // Check if session exists; create if needed
-        let session_arc = match self
-            .ensure_session(channel_id, &project.project_path)
-            .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                // #30: If stale session, clear and retry
-                if e.contains("No conversation found with session ID") {
-                    warn!("[session] Stale session for {channel_id_str}, clearing and retrying fresh");
-                    if let Err(e) = self.db.clear_session(&channel_id_str) {
-                        warn!("Failed to clear session: {e}");
+            // Auto-register channel if not registered
+            let project = match self.db.get_project(&channel_id_str) {
+                Some(p) => p,
+                None => {
+                    let project_path = config.sessions_dir().join(&channel_id_str);
+                    tokio::fs::create_dir_all(&project_path).await.ok();
+                    if let Err(e) = self.db.register_project(
+                        &channel_id_str,
+                        &project_path.to_string_lossy(),
+                        &guild_id.to_string(),
+                    ) {
+                        warn!(channel_id = %channel_id_str, error = %e, "failed to register project");
                     }
-                    self.cleanup_session_internal(&channel_id_str).await;
-                    return self.send_message(channel_id, guild_id, prompt).await;
+                    self.db.get_project(&channel_id_str)
+                    .ok_or_else(|| format!("Failed to retrieve project after registration for channel {channel_id_str}"))?
                 }
-                return Err(e);
-            }
-        };
+            };
 
-        // Set up the "Thinking..." message with stop button
-        let stop_row = create_stop_button(&channel_id_str);
-        let msg = self.discord
-            .send_message(
-                channel_id,
-                CreateMessage::new()
-                    .content("⏳ Thinking...")
-                    .components(vec![stop_row.clone()]),
-            )
-            .await
-            .map_err(|e| format!("Failed to send thinking message: {e}"))?;
+            // Check if session exists; create if needed
+            let session_arc = match self.ensure_session(channel_id, &project.project_path).await {
+                Ok(s) => s,
+                Err(e) => {
+                    // #30: If stale session, clear and retry
+                    if e.contains("No conversation found with session ID") {
+                        warn!(channel_id = %channel_id_str, "stale session detected, clearing and retrying fresh");
+                        if let Err(e) = self.db.clear_session(&channel_id_str) {
+                            warn!(channel_id = %channel_id_str, error = %e, "failed to clear session");
+                        }
+                        self.cleanup_session_internal(&channel_id_str).await;
+                        return self.send_message(channel_id, guild_id, prompt).await;
+                    }
+                    return Err(e);
+                }
+            };
 
-        let msg_id = msg;
-        let start_time = Instant::now();
+            // Set up the "Thinking..." message with stop button
+            let stop_row = create_stop_button(&channel_id_str);
+            let msg = self
+                .discord
+                .send_message(
+                    channel_id,
+                    CreateMessage::new()
+                        .content("⏳ Thinking...")
+                        .components(vec![stop_row.clone()]),
+                )
+                .await
+                .map_err(|e| format!("Failed to send thinking message: {e}"))?;
 
-        // Send the user message to the Claude process
-        {
-            let mut session = session_arc.lock().await;
-            session.busy = true;
-            session.process.send_message(prompt).await?;
-        }
+            let msg_id = msg;
+            let start_time = Instant::now();
 
-        self.update_status(&channel_id_str, SessionStatus::Online);
-
-        // Process messages from the Claude process
-        let mut response_buffer = String::new();
-        let mut last_edit_time = Instant::now() - std::time::Duration::from_secs(10);
-        let mut current_msg_id = msg_id;
-        let mut tool_use_count = 0u32;
-        let mut has_text_output = false;
-        let mut has_result = false;
-        let mut last_activity = "Thinking...".to_string();
-
-        loop {
-            let message = {
+            // Send the user message to the Claude process
+            {
                 let mut session = session_arc.lock().await;
-                tokio::select! {
-                    msg = session.process.message_rx.recv() => msg,
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                        // Heartbeat — update status message if no text output yet
+                session.busy = true;
+                session.process.send_message(prompt).await?;
+            }
+
+            self.update_status(&channel_id_str, SessionStatus::Online);
+
+            // Process messages from the Claude process
+            let mut response_buffer = String::new();
+            let mut last_edit_time = Instant::now() - std::time::Duration::from_secs(10);
+            let mut current_msg_id = msg_id;
+            let mut tool_use_count = 0u32;
+            let mut has_text_output = false;
+            let mut has_result = false;
+            let mut last_activity = "Thinking...".to_string();
+
+            loop {
+                let message = {
+                    let mut session = session_arc.lock().await;
+                    tokio::select! {
+                        msg = session.process.message_rx.recv() => msg,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                            // Heartbeat — update status message if no text output yet
+                            if !has_text_output {
+                                let elapsed = start_time.elapsed().as_secs();
+                                let time_str = if elapsed > 60 {
+                                    format!("{}m {}s", elapsed / 60, elapsed % 60)
+                                } else {
+                                    format!("{elapsed}s")
+                                };
+                                let _ = self.discord.edit_message(
+                                    channel_id,
+                                    current_msg_id,
+                                    EditMessage::new()
+                                        .content(format!("⏳ {last_activity} ({time_str})"))
+                                        .components(vec![stop_row.clone()]),
+                                ).await;
+                            }
+                            continue;
+                        }
+                    }
+                };
+
+                let message = match message {
+                    Some(m) => m,
+                    None => break, // Process ended
+                };
+
+                match message {
+                    SdkMessage::System {
+                        subtype,
+                        session_id,
+                        ..
+                    } => {
+                        if subtype == "init"
+                            && let Some(sid) = session_id
+                        {
+                            let mut session = session_arc.lock().await;
+                            session.session_id = Some(sid.clone());
+                            if let Err(e) = self.db.upsert_session(
+                                &session.db_id,
+                                &channel_id_str,
+                                Some(&sid),
+                                SessionStatus::Idle,
+                            ) {
+                                warn!("Failed to upsert session: {e}");
+                            }
+
+                            // Apply per-channel disabled MCPs
+                            let disabled = self.db.get_disabled_mcps(&channel_id_str);
+                            for name in disabled {
+                                let mut params = HashMap::new();
+                                params.insert(
+                                    "server_name".to_string(),
+                                    serde_json::Value::String(name),
+                                );
+                                params
+                                    .insert("enabled".to_string(), serde_json::Value::Bool(false));
+                                let _ = session
+                                    .process
+                                    .send_control("toggle_mcp_server", params)
+                                    .await;
+                            }
+                        }
+                    }
+
+                    SdkMessage::Assistant { content, .. } => {
+                        for block in &content {
+                            if let ContentBlock::Text { text } = block {
+                                response_buffer.push_str(text);
+                                has_text_output = true;
+                            }
+                        }
+
+                        // Throttled message edit
+                        let now = Instant::now();
+                        if now.duration_since(last_edit_time).as_millis() >= self.edit_interval_ms
+                            && !response_buffer.is_empty()
+                        {
+                            last_edit_time = now;
+                            let chunks = split_message(&response_buffer);
+                            if let Some(first) = chunks.first() {
+                                let _ = self
+                                    .discord
+                                    .edit_message(
+                                        channel_id,
+                                        current_msg_id,
+                                        EditMessage::new().content(first).components(vec![]),
+                                    )
+                                    .await;
+                            }
+                            for chunk in chunks.iter().skip(1) {
+                                if let Ok(new_id) = self
+                                    .discord
+                                    .send_message(channel_id, CreateMessage::new().content(chunk))
+                                    .await
+                                {
+                                    current_msg_id = new_id;
+                                }
+                            }
+                            // Clear buffer only after all chunks sent
+                            if chunks.len() > 1 {
+                                response_buffer.clear();
+                            }
+                        }
+                    }
+
+                    SdkMessage::ToolUse {
+                        tool_name,
+                        input,
+                        request_id,
+                        ..
+                    } => {
+                        tool_use_count += 1;
+
+                        let tool_label = match tool_name.as_str() {
+                            "Read" => "Reading files",
+                            "Glob" => "Searching files",
+                            "Grep" => "Searching code",
+                            "Write" => "Writing file",
+                            "Edit" => "Editing file",
+                            "Bash" => "Running command",
+                            "WebSearch" => "Searching web",
+                            "WebFetch" => "Fetching URL",
+                            "TodoWrite" => "Updating tasks",
+                            "mcp__user__send_file" => "Sending file",
+                            other => other,
+                        };
+                        let file_hint = input
+                            .get("file_path")
+                            .and_then(|v| v.as_str())
+                            .and_then(|p| p.rsplit(&['/', '\\'][..]).next())
+                            .map(|f| format!(" `{f}`"))
+                            .unwrap_or_default();
+                        // Escape underscores in fallback tool names to prevent Discord italics
+                        let escaped_label = tool_label.replace('_', "\\_");
+                        last_activity = format!("{escaped_label}{file_hint}");
+
                         if !has_text_output {
                             let elapsed = start_time.elapsed().as_secs();
                             let time_str = if elapsed > 60 {
@@ -169,142 +326,7 @@ impl SessionManager {
                             } else {
                                 format!("{elapsed}s")
                             };
-                            let _ = self.discord.edit_message(
-                                channel_id,
-                                current_msg_id,
-                                EditMessage::new()
-                                    .content(format!("⏳ {last_activity} ({time_str})"))
-                                    .components(vec![stop_row.clone()]),
-                            ).await;
-                        }
-                        continue;
-                    }
-                }
-            };
-
-            let message = match message {
-                Some(m) => m,
-                None => break, // Process ended
-            };
-
-            match message {
-                SdkMessage::System {
-                    subtype,
-                    session_id,
-                    ..
-                } => {
-                    if subtype == "init"
-                        && let Some(sid) = session_id
-                    {
-                        let mut session = session_arc.lock().await;
-                        session.session_id = Some(sid.clone());
-                        if let Err(e) = self.db.upsert_session(
-                            &session.db_id,
-                            &channel_id_str,
-                            Some(&sid),
-                            SessionStatus::Idle,
-                        ) {
-                            warn!("Failed to upsert session: {e}");
-                        }
-
-                        // Apply per-channel disabled MCPs
-                        let disabled = self.db.get_disabled_mcps(&channel_id_str);
-                        for name in disabled {
-                            let mut params = HashMap::new();
-                            params.insert(
-                                "server_name".to_string(),
-                                serde_json::Value::String(name),
-                            );
-                            params.insert(
-                                "enabled".to_string(),
-                                serde_json::Value::Bool(false),
-                            );
-                            let _ = session
-                                .process
-                                .send_control("toggle_mcp_server", params)
-                                .await;
-                        }
-                    }
-                }
-
-                SdkMessage::Assistant { content, .. } => {
-                    for block in &content {
-                        if let ContentBlock::Text { text } = block {
-                            response_buffer.push_str(text);
-                            has_text_output = true;
-                        }
-                    }
-
-                    // Throttled message edit
-                    let now = Instant::now();
-                    if now.duration_since(last_edit_time).as_millis() >= EDIT_INTERVAL_MS
-                        && !response_buffer.is_empty()
-                    {
-                        last_edit_time = now;
-                        let chunks = split_message(&response_buffer);
-                        if let Some(first) = chunks.first() {
                             let _ = self.discord
-                                .edit_message(
-                                    channel_id,
-                                    current_msg_id,
-                                    EditMessage::new().content(first).components(vec![]),
-                                )
-                                .await;
-                        }
-                        for chunk in chunks.iter().skip(1) {
-                            if let Ok(new_id) = self.discord
-                                .send_message(channel_id, CreateMessage::new().content(chunk))
-                                .await
-                            {
-                                current_msg_id = new_id;
-                            }
-                        }
-                        // Clear buffer only after all chunks sent
-                        if chunks.len() > 1 {
-                            response_buffer.clear();
-                        }
-                    }
-                }
-
-                SdkMessage::ToolUse {
-                    tool_name,
-                    input,
-                    request_id,
-                    ..
-                } => {
-                    tool_use_count += 1;
-
-                    let tool_label = match tool_name.as_str() {
-                        "Read" => "Reading files",
-                        "Glob" => "Searching files",
-                        "Grep" => "Searching code",
-                        "Write" => "Writing file",
-                        "Edit" => "Editing file",
-                        "Bash" => "Running command",
-                        "WebSearch" => "Searching web",
-                        "WebFetch" => "Fetching URL",
-                        "TodoWrite" => "Updating tasks",
-                        "mcp__user__send_file" => "Sending file",
-                        other => other,
-                    };
-                    let file_hint = input
-                        .get("file_path")
-                        .and_then(|v| v.as_str())
-                        .and_then(|p| p.rsplit(&['/', '\\'][..]).next())
-                        .map(|f| format!(" `{f}`"))
-                        .unwrap_or_default();
-                    // Escape underscores in fallback tool names to prevent Discord italics
-                    let escaped_label = tool_label.replace('_', "\\_");
-                    last_activity = format!("{escaped_label}{file_hint}");
-
-                    if !has_text_output {
-                        let elapsed = start_time.elapsed().as_secs();
-                        let time_str = if elapsed > 60 {
-                            format!("{}m {}s", elapsed / 60, elapsed % 60)
-                        } else {
-                            format!("{elapsed}s")
-                        };
-                        let _ = self.discord
                             .edit_message(
                                 channel_id,
                                 current_msg_id,
@@ -315,83 +337,98 @@ impl SessionManager {
                                     .components(vec![stop_row.clone()]),
                             )
                             .await;
+                        }
+
+                        let decision = self
+                            .handle_tool_use(
+                                channel_id,
+                                &channel_id_str,
+                                &tool_name,
+                                &input,
+                                &request_id,
+                            )
+                            .await;
+
+                        let mut session = session_arc.lock().await;
+                        let _ = session
+                            .process
+                            .send_tool_result(
+                                &request_id,
+                                &decision.0,
+                                decision.1.as_deref(),
+                                decision.2,
+                            )
+                            .await;
                     }
 
-                    let decision = self
-                        .handle_tool_use(channel_id, &channel_id_str, &tool_name, &input, &request_id)
-                        .await;
-
-                    let mut session = session_arc.lock().await;
-                    let _ = session
-                        .process
-                        .send_tool_result(
-                            &request_id,
-                            &decision.0,
-                            decision.1.as_deref(),
-                            decision.2,
-                        )
-                        .await;
-                }
-
-                SdkMessage::Result {
-                    result,
-                    duration_ms,
-                    usage,
-                    total_cost_usd,
-                    ..
-                } => {
-                    // Flush remaining buffer
-                    if !response_buffer.is_empty() {
-                        let chunks = split_message(&response_buffer);
-                        if let Some(first) = chunks.first() {
-                            let _ = self.discord
-                                .edit_message(
-                                    channel_id,
-                                    current_msg_id,
-                                    EditMessage::new().content(first),
-                                )
-                                .await;
-                        }
-                        for chunk in chunks.iter().skip(1) {
-                            let _ = self.discord
-                                .send_message(channel_id, CreateMessage::new().content(chunk))
-                                .await;
-                        }
-                    }
-
-                    // Replace stop button with completed button
-                    let _ = self.discord
-                        .edit_message(
-                            channel_id,
-                            current_msg_id,
-                            EditMessage::new().components(vec![create_completed_button()]),
-                        )
-                        .await;
-
-                    let result_text = result.as_deref().unwrap_or("Task completed");
-                    let (embed, file_data) = create_result_embed(
-                        result_text,
-                        usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
-                        usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
-                        duration_ms.unwrap_or(0),
+                    SdkMessage::Result {
+                        result,
+                        duration_ms,
+                        usage,
                         total_cost_usd,
-                    );
-                    let mut create_msg = CreateMessage::new().embed(embed);
-                    if let Some(data) = file_data {
-                        create_msg =
-                            create_msg.add_file(CreateAttachment::bytes(data, "result.txt"));
-                    }
-                    let _ = self.discord.send_message(channel_id, create_msg).await;
+                        ..
+                    } => {
+                        // Flush remaining buffer
+                        if !response_buffer.is_empty() {
+                            let chunks = split_message(&response_buffer);
+                            if let Some(first) = chunks.first() {
+                                let _ = self
+                                    .discord
+                                    .edit_message(
+                                        channel_id,
+                                        current_msg_id,
+                                        EditMessage::new().content(first),
+                                    )
+                                    .await;
+                            }
+                            for chunk in chunks.iter().skip(1) {
+                                let _ = self
+                                    .discord
+                                    .send_message(channel_id, CreateMessage::new().content(chunk))
+                                    .await;
+                            }
+                        }
 
-                    // Detect auth/credit errors
-                    let lower_result = result_text.to_lowercase();
-                    let auth_keywords = [
-                        "credit balance", "not authenticated", "unauthorized",
-                        "authentication", "login required", "auth token",
-                        "expired", "not logged in", "please run /login",
-                    ];
-                    if auth_keywords.iter().any(|kw| lower_result.contains(kw)) {
-                        let _ = self.discord
+                        // Replace stop button with completed button
+                        let _ = self
+                            .discord
+                            .edit_message(
+                                channel_id,
+                                current_msg_id,
+                                EditMessage::new().components(vec![create_completed_button()]),
+                            )
+                            .await;
+
+                        let result_text = result.as_deref().unwrap_or("Task completed");
+                        let (embed, file_data) = create_result_embed(
+                            result_text,
+                            usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+                            usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
+                            duration_ms.unwrap_or(0),
+                            total_cost_usd,
+                        );
+                        let mut create_msg = CreateMessage::new().embed(embed);
+                        if let Some(data) = file_data {
+                            create_msg =
+                                create_msg.add_file(CreateAttachment::bytes(data, "result.txt"));
+                        }
+                        let _ = self.discord.send_message(channel_id, create_msg).await;
+
+                        // Detect auth/credit errors
+                        let lower_result = result_text.to_lowercase();
+                        let auth_keywords = [
+                            "credit balance",
+                            "not authenticated",
+                            "unauthorized",
+                            "authentication",
+                            "login required",
+                            "auth token",
+                            "expired",
+                            "not logged in",
+                            "please run /login",
+                        ];
+                        if auth_keywords.iter().any(|kw| lower_result.contains(kw)) {
+                            let _ = self.discord
                             .send_message(
                                 channel_id,
                                 CreateMessage::new().content(
@@ -399,31 +436,31 @@ impl SessionManager {
                                 ),
                             )
                             .await;
+                        }
+
+                        has_result = true;
+                        {
+                            let mut session = session_arc.lock().await;
+                            session.busy = false;
+                        }
+                        self.update_status(&channel_id_str, SessionStatus::Idle);
+
+                        // #1: Process next queued message (actually calls send_message)
+                        self.process_queue(&channel_id_str).await;
+                        break;
                     }
 
-                    has_result = true;
-                    {
-                        let mut session = session_arc.lock().await;
-                        session.busy = false;
-                    }
-                    self.update_status(&channel_id_str, SessionStatus::Idle);
-
-                    // #1: Process next queued message (actually calls send_message)
-                    self.process_queue(&channel_id_str).await;
-                    break;
+                    SdkMessage::Unknown => {}
                 }
-
-                SdkMessage::Unknown => {}
             }
-        }
 
-        // #14: If we exited without a result, handle error properly
-        if !has_result {
-            self.handle_turn_error(channel_id, &channel_id_str, &session_arc, &start_time)
-                .await;
-        }
+            // #14: If we exited without a result, handle error properly
+            if !has_result {
+                self.handle_turn_error(channel_id, &channel_id_str, &session_arc, &start_time)
+                    .await;
+            }
 
-        Ok(())
+            Ok(())
         }) // Box::pin
     }
 
@@ -447,15 +484,23 @@ impl SessionManager {
         };
 
         let mut err_msg = match exit_info {
-            Some(status) => format!("Claude process exited with {status}. The server may be temporarily unavailable — please try again later."),
+            Some(status) => format!(
+                "Claude process exited with {status}. The server may be temporarily unavailable — please try again later."
+            ),
             None => "Claude session ended unexpectedly.".to_string(),
         };
 
         // Detect auth/credit errors
         let auth_keywords = [
-            "credit balance", "not authenticated", "unauthorized",
-            "authentication", "login required", "auth token",
-            "expired", "not logged in", "please run /login",
+            "credit balance",
+            "not authenticated",
+            "unauthorized",
+            "authentication",
+            "login required",
+            "auth token",
+            "expired",
+            "not logged in",
+            "please run /login",
         ];
         let lower_msg = err_msg.to_lowercase();
         if auth_keywords.iter().any(|kw| lower_msg.contains(kw)) {
@@ -464,8 +509,12 @@ impl SessionManager {
             );
         }
 
-        let _ = self.discord
-            .send_message(channel_id, CreateMessage::new().content(format!("❌ {err_msg}")))
+        let _ = self
+            .discord
+            .send_message(
+                channel_id,
+                CreateMessage::new().content(format!("❌ {err_msg}")),
+            )
             .await;
 
         self.update_status(channel_id_str, SessionStatus::Offline);
@@ -553,7 +602,7 @@ impl SessionManager {
 
         let cmd = command.to_string();
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(SDK_CALL_TIMEOUT_SECS),
+            std::time::Duration::from_secs(self.sdk_call_timeout_secs),
             async {
                 let mut session = session_arc.lock().await;
                 session.process.send_control(&cmd, params).await
@@ -564,11 +613,11 @@ impl SessionManager {
         match result {
             Ok(Ok(())) => Some(()),
             Ok(Err(e)) => {
-                warn!("[session] SDK control error for {channel_id_str}: {e}");
+                warn!(channel_id = %channel_id_str, error = %e, "SDK control error");
                 None
             }
             Err(_) => {
-                warn!("[session] SDK call timed out for {channel_id_str}, cleaning up");
+                warn!(channel_id = %channel_id_str, "SDK call timed out, cleaning up");
                 self.stop_session(channel_id_str).await;
                 None
             }
@@ -582,9 +631,13 @@ impl SessionManager {
         enabled: bool,
     ) {
         let mut params = HashMap::new();
-        params.insert("server_name".to_string(), serde_json::Value::String(server_name.to_string()));
+        params.insert(
+            "server_name".to_string(),
+            serde_json::Value::String(server_name.to_string()),
+        );
         params.insert("enabled".to_string(), serde_json::Value::Bool(enabled));
-        self.sdk_control(channel_id_str, "toggle_mcp_server", params).await;
+        self.sdk_control(channel_id_str, "toggle_mcp_server", params)
+            .await;
 
         // Persist to DB
         let disabled = self.db.get_disabled_mcps(channel_id_str);
@@ -640,7 +693,8 @@ impl SessionManager {
         // Ask user via Discord buttons
         let (embed, row) = create_tool_approval_embed(tool_name, input, request_id);
         self.update_status(channel_id_str, SessionStatus::Waiting);
-        let _ = self.discord
+        let _ = self
+            .discord
             .send_message(
                 channel_id,
                 CreateMessage::new().embed(embed).components(vec![row]),
@@ -661,7 +715,7 @@ impl SessionManager {
         }
 
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS),
+            std::time::Duration::from_secs(self.approval_timeout_secs),
             rx,
         )
         .await;
@@ -700,15 +754,12 @@ impl SessionManager {
             let question_data = parse_question_data(q_val);
             let q_request_id = Uuid::new_v4().to_string();
 
-            let (embed, components) = create_ask_user_question_embed(
-                &question_data,
-                &q_request_id,
-                qi,
-                questions.len(),
-            );
+            let (embed, components) =
+                create_ask_user_question_embed(&question_data, &q_request_id, qi, questions.len());
 
             self.update_status(channel_id_str, SessionStatus::Waiting);
-            let _ = self.discord
+            let _ = self
+                .discord
                 .send_message(
                     channel_id,
                     CreateMessage::new().embed(embed).components(components),
@@ -728,17 +779,14 @@ impl SessionManager {
             }
 
             let answer = tokio::time::timeout(
-                std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS),
+                std::time::Duration::from_secs(self.approval_timeout_secs),
                 rx,
             )
             .await;
 
             match answer {
                 Ok(Ok(Some(ans))) => {
-                    answers.insert(
-                        question_data.header.clone(),
-                        serde_json::Value::String(ans),
-                    );
+                    answers.insert(question_data.header.clone(), serde_json::Value::String(ans));
                 }
                 _ => {
                     self.pending_questions.lock().remove(&q_request_id);
@@ -752,7 +800,10 @@ impl SessionManager {
 
         let mut updated_input = input.clone();
         if let Some(obj) = updated_input.as_object_mut() {
-            obj.insert("answers".to_string(), serde_json::to_value(&answers).unwrap());
+            obj.insert(
+                "answers".to_string(),
+                serde_json::to_value(&answers).unwrap(),
+            );
         }
 
         ("allow".into(), None, Some(updated_input))
@@ -770,7 +821,11 @@ impl SessionManager {
 
         let path = Path::new(file_path);
         if !path.exists() {
-            return ("deny".into(), Some(format!("File not found: {file_path}")), None);
+            return (
+                "deny".into(),
+                Some(format!("File not found: {file_path}")),
+                None,
+            );
         }
 
         let metadata = match std::fs::metadata(path) {
@@ -779,23 +834,29 @@ impl SessionManager {
         };
 
         if metadata.len() > 25 * 1024 * 1024 {
-            return ("deny".into(), Some("File exceeds Discord's 25MB limit".into()), None);
+            return (
+                "deny".into(),
+                Some("File exceeds Discord's 25MB limit".into()),
+                None,
+            );
         }
 
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("file");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
 
         match tokio::fs::read(path).await {
             Ok(data) => {
                 let attachment = CreateAttachment::bytes(data, file_name);
-                let _ = self.discord
+                let _ = self
+                    .discord
                     .send_message(channel_id, CreateMessage::new().add_file(attachment))
                     .await;
                 ("allow".into(), None, None)
             }
-            Err(e) => ("deny".into(), Some(format!("Failed to send file: {e}")), None),
+            Err(e) => (
+                "deny".into(),
+                Some(format!("Failed to send file: {e}")),
+                None,
+            ),
         }
     }
 
@@ -853,6 +914,28 @@ impl SessionManager {
         self.pending_custom_inputs.lock().contains_key(channel_id)
     }
 
+    /// Gracefully shut down all active sessions, updating DB statuses to offline.
+    pub async fn shutdown(&self) {
+        let channels: Vec<String> = self.sessions.read().await.keys().cloned().collect();
+        for channel_id in &channels {
+            self.stop_session(channel_id).await;
+        }
+    }
+
+    /// Remove expired entries from pending maps. Call periodically.
+    pub fn cleanup_expired_pending(&self) {
+        // pending_approvals and pending_questions entries whose oneshot receiver
+        // has been dropped (timeout fired) leave dead entries in the map.
+        // The sender is still in the map but the receiver is gone — sending will fail.
+        // We clean these by attempting to detect closed channels.
+        self.pending_approvals
+            .lock()
+            .retain(|_, pending| !pending.tx.is_closed());
+        self.pending_questions
+            .lock()
+            .retain(|_, pending| !pending.tx.is_closed());
+    }
+
     pub async fn stop_session(&self, channel_id: &str) -> bool {
         let session = self.sessions.write().await.remove(channel_id);
         if let Some(session_arc) = session {
@@ -884,8 +967,12 @@ impl SessionManager {
     }
 
     fn cleanup_pending(&self, channel_id: &str) {
-        self.pending_approvals.lock().retain(|_, v| v.channel_id != channel_id);
-        self.pending_questions.lock().retain(|_, v| v.channel_id != channel_id);
+        self.pending_approvals
+            .lock()
+            .retain(|_, v| v.channel_id != channel_id);
+        self.pending_questions
+            .lock()
+            .retain(|_, v| v.channel_id != channel_id);
         self.pending_custom_inputs.lock().remove(channel_id);
     }
 
@@ -896,26 +983,14 @@ impl SessionManager {
 
     /// Update session status in DB and broadcast to status channel if configured.
     fn update_status(&self, channel_id: &str, status: SessionStatus) {
-        let old = self
-            .db
-            .get_session(channel_id)
-            .map(|s| s.status)
-            .unwrap_or(SessionStatus::Offline);
-        if let Err(e) = self.db.update_session_status(channel_id, status) {
-            warn!("Failed to update session status: {e}");
-        }
+        let old = self.db.swap_session_status(channel_id, status);
         if old != status {
             self.notify_status_change(channel_id, old, status);
         }
     }
 
     /// Send a status change embed to the configured status channel.
-    fn notify_status_change(
-        &self,
-        channel_id: &str,
-        old: SessionStatus,
-        new: SessionStatus,
-    ) {
+    fn notify_status_change(&self, channel_id: &str, old: SessionStatus, new: SessionStatus) {
         let config = get_config();
         let status_ch = match config.status_channel_id {
             Some(id) => ChannelId::new(id),
@@ -988,7 +1063,7 @@ impl SessionManager {
         self.message_queues
             .lock()
             .get(channel_id)
-            .map(|q| q.len() >= MAX_QUEUE_SIZE)
+            .map(|q| q.len() >= self.max_queue_size)
             .unwrap_or(false)
     }
 
@@ -1063,7 +1138,8 @@ impl SessionManager {
         } else {
             format!("📨 Processing queued message...\n> {preview}")
         };
-        let _ = self.discord
+        let _ = self
+            .discord
             .send_message(next.channel_id, CreateMessage::new().content(msg))
             .await;
 
@@ -1074,28 +1150,63 @@ impl SessionManager {
 
         tokio::spawn(async move {
             if let Err(e) = self_clone.send_message(ch_id, g_id, &prompt).await {
-                error!("[queue] sendMessage error: {e}");
+                error!(channel_id = %ch_id, error = %e, "queued message failed");
+                let _ = self_clone
+                    .discord()
+                    .send_message(
+                        ch_id,
+                        CreateMessage::new().content(format!("❌ Queued message failed: {e}")),
+                    )
+                    .await;
             }
         });
     }
 }
 
 fn parse_question_data(val: &serde_json::Value) -> AskQuestionData {
-    let question = val.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let header = val.get("header").and_then(|v| v.as_str()).unwrap_or("Question").to_string();
-    let multi_select = val.get("multiSelect").and_then(|v| v.as_bool()).unwrap_or(false);
-    let options = val
-        .get("options")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .map(|o| AskOption {
-                    label: o.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    description: o.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                })
-                .collect()
+    let question = val
+        .get("question")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            warn!(data = %val, "question field missing or not a string in SDK question data");
+            ""
         })
-        .unwrap_or_default();
+        .to_string();
+    let header = val
+        .get("header")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Question")
+        .to_string();
+    let multi_select = val
+        .get("multiSelect")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let options = match val.get("options").and_then(|v| v.as_array()) {
+        Some(arr) => arr
+            .iter()
+            .map(|o| AskOption {
+                label: o
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                description: o
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+            .collect(),
+        None => {
+            warn!(data = %val, "options field missing or not an array in SDK question data");
+            vec![]
+        }
+    };
 
-    AskQuestionData { question, header, options, multi_select }
+    AskQuestionData {
+        question,
+        header,
+        options,
+        multi_select,
+    }
 }

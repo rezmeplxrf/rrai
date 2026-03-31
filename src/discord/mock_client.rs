@@ -109,9 +109,10 @@ impl DiscordClient for MockDiscordClient {
         message_id: MessageId,
         _message: EditMessage,
     ) -> Result<(), String> {
-        self.calls
-            .lock()
-            .push(DiscordCall::EditMessage { channel_id, message_id });
+        self.calls.lock().push(DiscordCall::EditMessage {
+            channel_id,
+            message_id,
+        });
         Ok(())
     }
 

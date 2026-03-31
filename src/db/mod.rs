@@ -1,7 +1,7 @@
 pub mod types;
 
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::error;
@@ -129,15 +129,14 @@ impl Database {
             })
         }) {
             Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-            Err(e) => { error!("get_all_projects({guild_id}) query: {e}"); vec![] }
+            Err(e) => {
+                error!("get_all_projects({guild_id}) query: {e}");
+                vec![]
+            }
         }
     }
 
-    pub fn set_auto_approve(
-        &self,
-        channel_id: &str,
-        auto_approve: bool,
-    ) -> rusqlite::Result<()> {
+    pub fn set_auto_approve(&self, channel_id: &str, auto_approve: bool) -> rusqlite::Result<()> {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE projects SET auto_approve = ?1 WHERE channel_id = ?2",
@@ -207,6 +206,27 @@ impl Database {
         Ok(())
     }
 
+    /// Atomically read the old status and update to the new status within a single lock.
+    pub fn swap_session_status(
+        &self,
+        channel_id: &str,
+        new_status: SessionStatus,
+    ) -> SessionStatus {
+        let conn = self.conn.lock();
+        let old: String = conn
+            .query_row(
+                "SELECT status FROM sessions WHERE channel_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                params![channel_id],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "offline".to_string());
+        let _ = conn.execute(
+            "UPDATE sessions SET status = ?1, last_activity = datetime('now') WHERE channel_id = ?2",
+            params![new_status.as_str(), channel_id],
+        );
+        SessionStatus::parse(&old)
+    }
+
     pub fn get_all_sessions(&self, guild_id: &str) -> Vec<SessionWithProject> {
         let conn = self.conn.lock();
         let mut stmt = match conn.prepare(
@@ -231,7 +251,10 @@ impl Database {
             })
         }) {
             Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-            Err(e) => { error!("get_all_sessions({guild_id}) query: {e}"); vec![] }
+            Err(e) => {
+                error!("get_all_sessions({guild_id}) query: {e}");
+                vec![]
+            }
         }
     }
 
@@ -253,7 +276,10 @@ impl Database {
             params![channel_id],
             |row| row.get::<_, Option<String>>(0),
         )
-        .map_err(|e| { error!("get_model({channel_id}): {e}"); e })
+        .map_err(|e| {
+            error!("get_model({channel_id}): {e}");
+            e
+        })
         .ok()
         .flatten()
     }
@@ -268,7 +294,10 @@ impl Database {
                 params![channel_id],
                 |row| row.get(0),
             )
-            .map_err(|e| { error!("get_disabled_mcps({channel_id}): {e}"); e })
+            .map_err(|e| {
+                error!("get_disabled_mcps({channel_id}): {e}");
+                e
+            })
             .ok()
             .flatten();
         match raw {
@@ -282,7 +311,10 @@ impl Database {
         let conn = self.conn.lock();
         let mut stmt = match conn.prepare("SELECT status, COUNT(*) FROM sessions GROUP BY status") {
             Ok(s) => s,
-            Err(e) => { error!("get_session_status_counts: {e}"); return (0, 0, 0); }
+            Err(e) => {
+                error!("get_session_status_counts: {e}");
+                return (0, 0, 0);
+            }
         };
         let mut online = 0u32;
         let mut waiting = 0u32;
@@ -291,7 +323,10 @@ impl Database {
             Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         }) {
             Ok(rows) => rows,
-            Err(e) => { error!("get_session_status_counts query: {e}"); return (0, 0, 0); }
+            Err(e) => {
+                error!("get_session_status_counts query: {e}");
+                return (0, 0, 0);
+            }
         };
         for row in rows.flatten() {
             match row.0.as_str() {
@@ -304,11 +339,7 @@ impl Database {
         (online, waiting, idle)
     }
 
-    pub fn set_disabled_mcps(
-        &self,
-        channel_id: &str,
-        names: &[String],
-    ) -> rusqlite::Result<()> {
+    pub fn set_disabled_mcps(&self, channel_id: &str, names: &[String]) -> rusqlite::Result<()> {
         let conn = self.conn.lock();
         let val = if names.is_empty() {
             None

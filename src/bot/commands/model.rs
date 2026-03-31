@@ -1,4 +1,4 @@
-use super::{reply, BotData};
+use super::{BotData, reply};
 use serenity::all::*;
 use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-use super::{reply_embed, BotData};
+use super::{BotData, reply_embed};
 use crate::db::types::SessionStatus;
 use serenity::all::*;
 use std::sync::Arc;
@@ -18,7 +18,9 @@ pub async fn run(
     if projects.is_empty() {
         let embed = CreateEmbed::new()
             .title("📊 Bot Status")
-            .description("No projects registered yet.\nSend a message in any channel to auto-register.")
+            .description(
+                "No projects registered yet.\nSend a message in any channel to auto-register.",
+            )
             .color(0x5865f2);
         return reply_embed(ctx, cmd, embed).await;
     }
@@ -39,7 +41,11 @@ pub async fn run(
             SessionStatus::Offline => "🔴",
         };
         let channel_id: u64 = project.channel_id.parse().unwrap_or(0);
-        let path = project.project_path.rsplit('/').next().unwrap_or(&project.project_path);
+        let path = project
+            .project_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&project.project_path);
         let auto = if project.auto_approve { " ⚡" } else { "" };
         lines.push(format!(
             "{status_icon} <#{channel_id}> — `{path}` — **{}**{auto}",

@@ -1,4 +1,4 @@
-use super::{reply, reply_embed_with_components, BotData};
+use super::{BotData, reply, reply_embed_with_components};
 use crate::bot::handlers::interaction::find_session_dir;
 use serenity::all::*;
 use std::sync::Arc;
@@ -83,11 +83,12 @@ pub async fn run(
             .unwrap_or_else(|_| "unknown".to_string());
 
         // #28: Show first user message as label (truncated to 50 chars)
-        let msg_preview = first_msg
-            .as_deref()
-            .unwrap_or("(no message)");
+        let msg_preview = first_msg.as_deref().unwrap_or("(no message)");
         let label = if msg_preview.len() > 50 {
-            format!("{}...", crate::claude::output_formatter::truncate(msg_preview, 47))
+            format!(
+                "{}...",
+                crate::claude::output_formatter::truncate(msg_preview, 47)
+            )
         } else {
             msg_preview.to_string()
         };
@@ -107,24 +108,15 @@ pub async fn run(
         options.push(opt);
     }
 
-    let select = CreateSelectMenu::new(
-        "session-select",
-        CreateSelectMenuKind::String { options },
-    )
-    .placeholder("Select a session...");
+    let select = CreateSelectMenu::new("session-select", CreateSelectMenuKind::String { options })
+        .placeholder("Select a session...");
 
     let embed = CreateEmbed::new()
         .title(format!("📋 Sessions ({})", session_files.len()))
         .description("Select a session to resume or delete.")
         .color(0x7c3aed);
 
-    reply_embed_with_components(
-        ctx,
-        cmd,
-        embed,
-        vec![CreateActionRow::SelectMenu(select)],
-    )
-    .await
+    reply_embed_with_components(ctx, cmd, embed, vec![CreateActionRow::SelectMenu(select)]).await
 }
 
 /// Read the first user message from a JSONL session file.

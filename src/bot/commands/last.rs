@@ -1,4 +1,4 @@
-use super::{reply, BotData};
+use super::{BotData, reply};
 use crate::bot::handlers::interaction::{find_session_dir, get_last_assistant_message};
 use crate::claude::output_formatter::split_message;
 use serenity::all::*;

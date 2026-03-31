@@ -1,8 +1,8 @@
-use once_cell::sync::OnceCell;
 use std::env;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
-static CONFIG: OnceCell<Config> = OnceCell::new();
+static CONFIG: OnceLock<Config> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -14,6 +14,14 @@ pub struct Config {
     pub rate_limit_per_minute: u32,
     /// Optional channel ID for broadcasting status changes
     pub status_channel_id: Option<u64>,
+    /// Discord message edit throttle interval in milliseconds (default: 1500)
+    pub edit_interval_ms: u128,
+    /// Timeout for tool approval in seconds (default: 300)
+    pub approval_timeout_secs: u64,
+    /// Maximum queued messages per channel (default: 5)
+    pub max_queue_size: usize,
+    /// Timeout for SDK control commands in seconds (default: 15)
+    pub sdk_call_timeout_secs: u64,
 }
 
 impl Config {
@@ -73,6 +81,26 @@ impl Config {
             .ok()
             .and_then(|s| s.parse::<u64>().ok());
 
+        let edit_interval_ms = env::var("EDIT_INTERVAL_MS")
+            .ok()
+            .and_then(|s| s.parse::<u128>().ok())
+            .unwrap_or(1500);
+
+        let approval_timeout_secs = env::var("APPROVAL_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(300);
+
+        let max_queue_size = env::var("MAX_QUEUE_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(5);
+
+        let sdk_call_timeout_secs = env::var("SDK_CALL_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(15);
+
         Ok(Config {
             discord_bot_token: token,
             discord_guild_id: guild_id,
@@ -80,6 +108,10 @@ impl Config {
             data_dir,
             rate_limit_per_minute,
             status_channel_id,
+            edit_interval_ms,
+            approval_timeout_secs,
+            max_queue_size,
+            sdk_call_timeout_secs,
         })
     }
 }
@@ -97,9 +129,15 @@ fn required_env(key: &str) -> Result<String, String> {
 }
 
 pub fn load_config() -> Result<&'static Config, String> {
-    CONFIG.get_or_try_init(Config::from_env)
+    if let Some(c) = CONFIG.get() {
+        return Ok(c);
+    }
+    let cfg = Config::from_env()?;
+    Ok(CONFIG.get_or_init(|| cfg))
 }
 
 pub fn get_config() -> &'static Config {
-    CONFIG.get().expect("Config not initialized — call load_config() first")
+    CONFIG
+        .get()
+        .expect("Config not initialized — call load_config() first")
 }

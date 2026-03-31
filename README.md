@@ -11,6 +11,11 @@ Discord-based Claude Code agent controller. Each Discord channel runs an isolate
 | `ALLOWED_USER_IDS` | Yes | Comma-separated Discord user IDs |
 | `RRAI_DATA_DIR` | No | Data directory (default: `~/.rrai`) |
 | `RATE_LIMIT_PER_MINUTE` | No | Per-user rate limit (default: 10) |
+| `STATUS_CHANNEL_ID` | No | Channel for session status notifications |
+| `EDIT_INTERVAL_MS` | No | Discord message edit throttle in ms (default: 1500) |
+| `APPROVAL_TIMEOUT_SECS` | No | Tool approval timeout in seconds (default: 300) |
+| `MAX_QUEUE_SIZE` | No | Max queued messages per channel (default: 5) |
+| `SDK_CALL_TIMEOUT_SECS` | No | SDK control command timeout in seconds (default: 15) |
 
 ## Features
 

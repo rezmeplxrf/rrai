@@ -68,18 +68,22 @@ pub fn split_message(text: &str) -> Vec<String> {
 }
 
 pub fn create_stop_button(channel_id: &str) -> CreateActionRow {
-    CreateActionRow::Buttons(vec![CreateButton::new(format!("stop:{channel_id}"))
-        .label("Stop")
-        .style(ButtonStyle::Danger)
-        .emoji('⏹')])
+    CreateActionRow::Buttons(vec![
+        CreateButton::new(format!("stop:{channel_id}"))
+            .label("Stop")
+            .style(ButtonStyle::Danger)
+            .emoji('⏹'),
+    ])
 }
 
 pub fn create_completed_button() -> CreateActionRow {
-    CreateActionRow::Buttons(vec![CreateButton::new("completed")
-        .label("Completed")
-        .style(ButtonStyle::Secondary)
-        .emoji('✅')
-        .disabled(true)])
+    CreateActionRow::Buttons(vec![
+        CreateButton::new("completed")
+            .label("Completed")
+            .style(ButtonStyle::Secondary)
+            .emoji('✅')
+            .disabled(true),
+    ])
 }
 
 pub fn create_tool_approval_embed(

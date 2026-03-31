@@ -1,4 +1,4 @@
-use super::{reply, BotData};
+use super::{BotData, reply};
 use crate::db::types::SessionStatus;
 use crate::utils::channel_name::to_channel_name;
 use serenity::all::*;
@@ -63,7 +63,9 @@ pub async fn run(
         None => {
             let slug = to_channel_name(&message);
             if slug.len() > 30 {
-                crate::claude::output_formatter::truncate(&slug, 30).trim_end_matches('-').to_string()
+                crate::claude::output_formatter::truncate(&slug, 30)
+                    .trim_end_matches('-')
+                    .to_string()
             } else {
                 slug
             }

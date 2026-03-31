@@ -14,7 +14,14 @@ use std::sync::Arc;
 fn setup() -> (Arc<SessionManager>, Arc<MockDiscordClient>, Database) {
     let db = Database::open(Path::new(":memory:")).expect("in-memory DB");
     let mock = Arc::new(MockDiscordClient::new());
-    let sm = SessionManager::new(db.clone(), mock.clone());
+    let sm = SessionManager::new_with_settings(
+        db.clone(),
+        mock.clone(),
+        1500, // edit_interval_ms
+        300,  // approval_timeout_secs
+        5,    // max_queue_size
+        15,   // sdk_call_timeout_secs
+    );
     (sm, mock, db)
 }
 
@@ -82,7 +89,10 @@ fn queue_multiple_prompts_ordering() {
         sm.set_pending_queue("ch-1", channel(1), guild(1), msg);
         sm.confirm_queue("ch-1");
     }
-    assert_eq!(sm.get_queue_prompts("ch-1"), vec!["first", "second", "third"]);
+    assert_eq!(
+        sm.get_queue_prompts("ch-1"),
+        vec!["first", "second", "third"]
+    );
 }
 
 #[test]
@@ -272,6 +282,22 @@ async fn toggle_mcp_persists_disabled_list() {
     sm.toggle_mcp_server("ch-1", "server-a", true).await;
     let disabled = db.get_disabled_mcps("ch-1");
     assert!(disabled.is_empty());
+}
+
+// --- Shutdown and cleanup ---
+
+#[tokio::test]
+async fn shutdown_with_no_sessions_succeeds() {
+    let (sm, _, _) = setup();
+    sm.shutdown().await;
+    // No panic = success
+}
+
+#[test]
+fn cleanup_expired_pending_removes_nothing_when_empty() {
+    let (sm, _, _) = setup();
+    sm.cleanup_expired_pending();
+    // No panic = success
 }
 
 #[tokio::test]

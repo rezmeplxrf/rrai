@@ -2,6 +2,7 @@ use crate::config::get_config;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Instant;
 
 struct RateLimitEntry {
@@ -9,8 +10,8 @@ struct RateLimitEntry {
     reset_at: Instant,
 }
 
-static RATE_LIMITS: once_cell::sync::Lazy<Mutex<HashMap<u64, RateLimitEntry>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+static RATE_LIMITS: LazyLock<Mutex<HashMap<u64, RateLimitEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn is_allowed_user(user_id: u64) -> bool {
     get_config().allowed_user_ids.contains(&user_id)

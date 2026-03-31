@@ -1,4 +1,4 @@
-use super::{reply_embed, BotData};
+use super::{BotData, reply_embed};
 use serenity::all::*;
 use std::sync::Arc;
 
@@ -15,7 +15,10 @@ pub async fn run(
     let models = [
         ("claude-opus-4-6", "Most capable, best for complex tasks"),
         ("claude-sonnet-4-6", "Balanced speed and quality"),
-        ("claude-haiku-4-5-20251001", "Fastest, best for simple tasks"),
+        (
+            "claude-haiku-4-5-20251001",
+            "Fastest, best for simple tasks",
+        ),
     ];
 
     let list: String = models
@@ -32,7 +35,9 @@ pub async fn run(
 
     let embed = CreateEmbed::new()
         .title("🤖 Available Models")
-        .description(format!("{list}\n\nCurrent: `{current}`\nUse `/model <name>` to change."))
+        .description(format!(
+            "{list}\n\nCurrent: `{current}`\nUse `/model <name>` to change."
+        ))
         .color(0x5865f2);
 
     reply_embed(ctx, cmd, embed).await

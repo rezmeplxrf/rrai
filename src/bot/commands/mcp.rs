@@ -1,4 +1,4 @@
-use super::{reply, reply_embed, BotData};
+use super::{BotData, reply, reply_embed};
 use serenity::all::*;
 use std::sync::Arc;
 
@@ -42,7 +42,8 @@ pub async fn run(
             } else {
                 // No active session — just update DB
                 if currently_disabled {
-                    let updated: Vec<String> = disabled.into_iter().filter(|n| n != &name).collect();
+                    let updated: Vec<String> =
+                        disabled.into_iter().filter(|n| n != &name).collect();
                     if let Err(e) = data.db.set_disabled_mcps(&channel_id_str, &updated) {
                         tracing::warn!("Failed to update disabled MCPs: {e}");
                     }
@@ -79,7 +80,11 @@ pub async fn run(
             let list: String = servers
                 .iter()
                 .map(|name| {
-                    let status = if disabled.contains(name) { "❌" } else { "✅" };
+                    let status = if disabled.contains(name) {
+                        "❌"
+                    } else {
+                        "✅"
+                    };
                     format!("{status} `{name}`")
                 })
                 .collect::<Vec<_>>()
@@ -95,11 +100,7 @@ pub async fn run(
     }
 }
 
-pub async fn autocomplete(
-    ctx: &Context,
-    auto: &CommandInteraction,
-    data: &Arc<BotData>,
-) {
+pub async fn autocomplete(ctx: &Context, auto: &CommandInteraction, data: &Arc<BotData>) {
     // Read from project dir, not cwd
     let channel_id_str = auto.channel_id.to_string();
     let mcp_path = data

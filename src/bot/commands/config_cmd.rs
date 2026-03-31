@@ -1,4 +1,4 @@
-use super::{reply_embed, BotData};
+use super::{BotData, reply_embed};
 use crate::config::get_config;
 use serenity::all::*;
 use std::sync::Arc;
@@ -14,7 +14,10 @@ pub async fn run(
 ) -> Result<(), String> {
     let config = get_config();
 
-    let token_preview = format!("{}***", &config.discord_bot_token[..4.min(config.discord_bot_token.len())]);
+    let token_preview = format!(
+        "{}***",
+        &config.discord_bot_token[..4.min(config.discord_bot_token.len())]
+    );
 
     let user_ids: String = config
         .allowed_user_ids
@@ -28,11 +31,7 @@ pub async fn run(
         .field("Token", format!("`{token_preview}`"), false)
         .field("Guild ID", format!("`{}`", config.discord_guild_id), true)
         .field("Allowed Users", user_ids, false)
-        .field(
-            "Data Dir",
-            format!("`{}`", config.data_dir),
-            false,
-        )
+        .field("Data Dir", format!("`{}`", config.data_dir), false)
         .field(
             "Rate Limit",
             format!("{}/min", config.rate_limit_per_minute),

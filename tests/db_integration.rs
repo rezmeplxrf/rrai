@@ -3,8 +3,8 @@
 //! Each test gets a fresh in-memory SQLite database so tests are isolated
 //! and can run in parallel.
 
-use rrai::db::types::SessionStatus;
 use rrai::db::Database;
+use rrai::db::types::SessionStatus;
 use std::path::Path;
 
 fn temp_db() -> Database {
@@ -16,7 +16,8 @@ fn temp_db() -> Database {
 #[test]
 fn register_and_retrieve_project() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/project1", "guild-1").unwrap();
+    db.register_project("ch-1", "/tmp/project1", "guild-1")
+        .unwrap();
 
     let project = db.get_project("ch-1").expect("project should exist");
     assert_eq!(project.channel_id, "ch-1");
@@ -45,7 +46,8 @@ fn register_project_upserts_on_conflict() {
 fn unregister_project_removes_project_and_sessions() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", Some("sid-1"), SessionStatus::Idle).unwrap();
+    db.upsert_session("s-1", "ch-1", Some("sid-1"), SessionStatus::Idle)
+        .unwrap();
 
     db.unregister_project("ch-1").unwrap();
 
@@ -92,7 +94,8 @@ fn set_auto_approve_toggles_flag() {
 fn upsert_and_retrieve_session() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", Some("claude-sess-1"), SessionStatus::Online).unwrap();
+    db.upsert_session("s-1", "ch-1", Some("claude-sess-1"), SessionStatus::Online)
+        .unwrap();
 
     let session = db.get_session("ch-1").expect("session should exist");
     assert_eq!(session.db_id, "s-1");
@@ -104,9 +107,11 @@ fn upsert_and_retrieve_session() {
 fn upsert_session_replaces_by_id() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Offline).unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Offline)
+        .unwrap();
     // Upsert with same id updates in place
-    db.upsert_session("s-1", "ch-1", Some("sid"), SessionStatus::Idle).unwrap();
+    db.upsert_session("s-1", "ch-1", Some("sid"), SessionStatus::Idle)
+        .unwrap();
 
     let session = db.get_session("ch-1").unwrap();
     assert_eq!(session.db_id, "s-1");
@@ -118,9 +123,11 @@ fn upsert_session_replaces_by_id() {
 fn update_session_status() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online)
+        .unwrap();
 
-    db.update_session_status("ch-1", SessionStatus::Waiting).unwrap();
+    db.update_session_status("ch-1", SessionStatus::Waiting)
+        .unwrap();
 
     let session = db.get_session("ch-1").unwrap();
     assert_eq!(session.status, SessionStatus::Waiting);
@@ -130,8 +137,10 @@ fn update_session_status() {
 fn clear_session_removes_all_for_channel() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
-    db.upsert_session("s-2", "ch-1", None, SessionStatus::Idle).unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online)
+        .unwrap();
+    db.upsert_session("s-2", "ch-1", None, SessionStatus::Idle)
+        .unwrap();
 
     db.clear_session("ch-1").unwrap();
     assert!(db.get_session("ch-1").is_none());
@@ -142,8 +151,10 @@ fn get_all_sessions_joins_project() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/a", "guild-1").unwrap();
     db.register_project("ch-2", "/tmp/b", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
-    db.upsert_session("s-2", "ch-2", None, SessionStatus::Idle).unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online)
+        .unwrap();
+    db.upsert_session("s-2", "ch-2", None, SessionStatus::Idle)
+        .unwrap();
 
     let sessions = db.get_all_sessions("guild-1");
     assert_eq!(sessions.len(), 2);
@@ -226,10 +237,51 @@ fn get_disabled_mcps_nonexistent_channel() {
 fn deleting_project_cascades_to_sessions() {
     let db = temp_db();
     db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online)
+        .unwrap();
 
     db.unregister_project("ch-1").unwrap();
     assert!(db.get_session("ch-1").is_none());
+}
+
+// --- swap_session_status ---
+
+#[test]
+fn swap_session_status_returns_old_and_updates() {
+    let db = temp_db();
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online)
+        .unwrap();
+
+    let old = db.swap_session_status("ch-1", SessionStatus::Waiting);
+    assert_eq!(old, SessionStatus::Online);
+
+    let session = db.get_session("ch-1").unwrap();
+    assert_eq!(session.status, SessionStatus::Waiting);
+}
+
+#[test]
+fn swap_session_status_no_session_returns_offline() {
+    let db = temp_db();
+    let old = db.swap_session_status("nonexistent", SessionStatus::Online);
+    assert_eq!(old, SessionStatus::Offline);
+}
+
+#[test]
+fn swap_session_status_is_atomic_with_repeated_calls() {
+    let db = temp_db();
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Idle)
+        .unwrap();
+
+    let old1 = db.swap_session_status("ch-1", SessionStatus::Online);
+    assert_eq!(old1, SessionStatus::Idle);
+
+    let old2 = db.swap_session_status("ch-1", SessionStatus::Waiting);
+    assert_eq!(old2, SessionStatus::Online);
+
+    let old3 = db.swap_session_status("ch-1", SessionStatus::Offline);
+    assert_eq!(old3, SessionStatus::Waiting);
 }
 
 // --- Concurrent access (basic) ---

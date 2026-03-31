@@ -1,11 +1,11 @@
 use crate::claude::session_manager::SessionManager;
-use crate::db::types::SessionStatus;
 use crate::db::Database;
+use crate::db::types::SessionStatus;
 use crate::security::is_allowed_user;
 use serenity::all::{
-    ButtonStyle, ComponentInteraction, ComponentInteractionDataKind, Context,
-    CreateActionRow, CreateButton, CreateEmbed, CreateInteractionResponse,
-    CreateInteractionResponseMessage, EditInteractionResponse,
+    ButtonStyle, ComponentInteraction, ComponentInteractionDataKind, Context, CreateActionRow,
+    CreateButton, CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage,
+    EditInteractionResponse,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -81,7 +81,9 @@ pub async fn handle_button_interaction(
             let confirmed = session_manager.confirm_queue(channel_id);
             let content = if confirmed {
                 let size = session_manager.get_queue_size(channel_id);
-                format!("📨 Message added to queue ({size}/5). It will be processed after the current task.")
+                format!(
+                    "📨 Message added to queue ({size}/5). It will be processed after the current task."
+                )
             } else {
                 "⏳ Queue request has expired.".to_string()
             };
@@ -299,7 +301,10 @@ pub async fn handle_button_interaction(
 
             if let Some(removed_prompt) = removed {
                 let preview = if removed_prompt.len() > 60 {
-                    format!("{}…", crate::claude::output_formatter::truncate(&removed_prompt, 60))
+                    format!(
+                        "{}…",
+                        crate::claude::output_formatter::truncate(&removed_prompt, 60)
+                    )
                 } else {
                     removed_prompt.clone()
                 };
@@ -485,12 +490,10 @@ pub async fn handle_select_menu_interaction(
     // Handle session select menu
     if custom_id == "session-select" {
         let selected = match &interaction.data.kind {
-            ComponentInteractionDataKind::StringSelect { values } => {
-                match values.first() {
-                    Some(v) => v.clone(),
-                    None => return,
-                }
-            }
+            ComponentInteractionDataKind::StringSelect { values } => match values.first() {
+                Some(v) => v.clone(),
+                None => return,
+            },
             _ => return,
         };
 
@@ -556,7 +559,10 @@ pub async fn handle_select_menu_interaction(
 
         let preview = if !last_message.is_empty() && last_message != "(no message)" {
             let truncated = if last_message.len() > 300 {
-                format!("{}...", crate::claude::output_formatter::truncate(&last_message, 300))
+                format!(
+                    "{}...",
+                    crate::claude::output_formatter::truncate(&last_message, 300)
+                )
             } else {
                 last_message
             };
@@ -593,9 +599,7 @@ pub fn find_session_dir(project_path: &str) -> Option<std::path::PathBuf> {
     }
 
     // Claude Code encodes the project path: / and \ and _ become -
-    let canonical = std::path::Path::new(project_path)
-        .canonicalize()
-        .ok()?;
+    let canonical = std::path::Path::new(project_path).canonicalize().ok()?;
     let canonical_str = canonical.to_string_lossy();
 
     // Try dash-encoded variant (replaces / \ _ with -)
@@ -668,14 +672,11 @@ pub fn get_last_assistant_message(file_path: &std::path::Path) -> Option<String>
             }
             // Try flat format: content at top level
             // Then nested format: message.content
-            let content_arr = val
-                .get("content")
-                .and_then(|c| c.as_array())
-                .or_else(|| {
-                    val.get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_array())
-                });
+            let content_arr = val.get("content").and_then(|c| c.as_array()).or_else(|| {
+                val.get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+            });
 
             if let Some(blocks) = content_arr {
                 let mut full_text = String::new();
@@ -729,8 +730,7 @@ fn get_button_label(interaction: &ComponentInteraction, custom_id: &str) -> Opti
         for component in &row.components {
             if let serenity::model::application::ActionRowComponent::Button(btn) = component
                 && let serenity::model::application::ButtonKind::NonLink {
-                    custom_id: ref cid,
-                    ..
+                    custom_id: ref cid, ..
                 } = btn.data
                 && cid == custom_id
             {

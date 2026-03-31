@@ -29,10 +29,7 @@ impl EventHandler for Handler {
 
         // Register slash commands
         match guild_id
-            .set_commands(
-                &ctx.http,
-                commands::all_commands(),
-            )
+            .set_commands(&ctx.http, commands::all_commands())
             .await
         {
             Ok(cmds) => info!("Registered {} slash commands", cmds.len()),
@@ -49,11 +46,13 @@ impl EventHandler for Handler {
             }
         });
 
-        // Periodic rate limit cleanup
-        tokio::spawn(async {
+        // Periodic rate limit and pending map cleanup
+        let cleanup_sm = self.data.session_manager.clone();
+        tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 crate::security::cleanup_rate_limits();
+                cleanup_sm.cleanup_expired_pending();
             }
         });
 
@@ -94,9 +93,7 @@ impl EventHandler for Handler {
                 let _ = cmd
                     .create_response(
                         &ctx.http,
-                        CreateInteractionResponse::Defer(
-                            CreateInteractionResponseMessage::new(),
-                        ),
+                        CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new()),
                     )
                     .await;
 
@@ -110,29 +107,27 @@ impl EventHandler for Handler {
                         .await;
                 }
             }
-            Interaction::Component(component) => {
-                match &component.data.kind {
-                    serenity::all::ComponentInteractionDataKind::Button => {
-                        interaction::handle_button_interaction(
-                            &ctx,
-                            &component,
-                            &self.data.db,
-                            &self.data.session_manager,
-                        )
-                        .await;
-                    }
-                    serenity::all::ComponentInteractionDataKind::StringSelect { .. } => {
-                        interaction::handle_select_menu_interaction(
-                            &ctx,
-                            &component,
-                            &self.data.db,
-                            &self.data.session_manager,
-                        )
-                        .await;
-                    }
-                    _ => {}
+            Interaction::Component(component) => match &component.data.kind {
+                serenity::all::ComponentInteractionDataKind::Button => {
+                    interaction::handle_button_interaction(
+                        &ctx,
+                        &component,
+                        &self.data.db,
+                        &self.data.session_manager,
+                    )
+                    .await;
                 }
-            }
+                serenity::all::ComponentInteractionDataKind::StringSelect { .. } => {
+                    interaction::handle_select_menu_interaction(
+                        &ctx,
+                        &component,
+                        &self.data.db,
+                        &self.data.session_manager,
+                    )
+                    .await;
+                }
+                _ => {}
+            },
             Interaction::Autocomplete(auto) => {
                 commands::handle_autocomplete(&ctx, &auto, &self.data).await;
             }
@@ -150,9 +145,15 @@ async fn update_bot_presence(ctx: &Context, db: &Database) {
     let total_active = online + waiting;
 
     let (status, activity_text) = if waiting > 0 && online > 0 {
-        (OnlineStatus::Online, format!("{online} working, {waiting} waiting"))
+        (
+            OnlineStatus::Online,
+            format!("{online} working, {waiting} waiting"),
+        )
     } else if waiting > 0 {
-        (OnlineStatus::Idle, format!("{waiting} waiting for approval"))
+        (
+            OnlineStatus::Idle,
+            format!("{waiting} waiting for approval"),
+        )
     } else if online > 0 {
         let label = if online == 1 { "session" } else { "sessions" };
         (OnlineStatus::Online, format!("{online} {label} active"))
@@ -202,13 +203,14 @@ async fn cleanup_orphaned_projects(db: &Database, http: &Http, guild_id: GuildId
 pub async fn start_bot(db: Database) -> Result<(), Box<dyn std::error::Error>> {
     let config = get_config();
 
-    let intents = GatewayIntents::GUILDS
-        | GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT;
+    let intents =
+        GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
     let http = Arc::new(Http::new(&config.discord_bot_token));
     let discord_client = Arc::new(SerenityDiscordClient::new(http.clone()));
     let session_manager = SessionManager::new(db.clone(), discord_client);
+
+    crate::register_session_manager(session_manager.clone());
 
     let data = Arc::new(BotData {
         db,

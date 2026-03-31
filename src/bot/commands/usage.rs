@@ -1,4 +1,4 @@
-use super::{reply_embed, BotData};
+use super::{BotData, reply_embed};
 use serenity::all::*;
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ pub async fn run(
         .description(
             "Usage tracking requires Claude API access.\n\n\
              Check your usage at: https://claude.ai/settings/usage\n\n\
-             *Note: Detailed usage dashboard integration is planned for a future release.*"
+             *Note: Detailed usage dashboard integration is planned for a future release.*",
         )
         .color(0x5865f2)
         .timestamp(Timestamp::now());

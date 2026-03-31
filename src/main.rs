@@ -85,7 +85,7 @@ async fn main() {
         process::exit(1);
     }
 
-    // #26: Release lock on SIGINT and SIGTERM
+    // Set up shutdown signal handler
     setup_signal_handlers();
 
     // Initialize database
@@ -102,8 +102,17 @@ async fn main() {
     // Start Discord bot
     if let Err(e) = rrai::bot::client::start_bot(db).await {
         error!("Fatal error: {e}");
+        graceful_shutdown().await;
         release_lock();
         process::exit(1);
+    }
+}
+
+async fn graceful_shutdown() {
+    if let Some(sm) = rrai::get_session_manager() {
+        info!("Shutting down active sessions...");
+        sm.shutdown().await;
+        info!("All sessions stopped");
     }
 }
 
@@ -112,6 +121,8 @@ fn setup_signal_handlers() {
     // SIGINT (Ctrl+C)
     tokio::spawn(async {
         let _ = tokio::signal::ctrl_c().await;
+        info!("Received SIGINT, shutting down gracefully...");
+        graceful_shutdown().await;
         release_lock();
         process::exit(0);
     });
@@ -119,9 +130,11 @@ fn setup_signal_handlers() {
     // SIGTERM
     #[cfg(unix)]
     tokio::spawn(async {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         if let Ok(mut sigterm) = signal(SignalKind::terminate()) {
             sigterm.recv().await;
+            info!("Received SIGTERM, shutting down gracefully...");
+            graceful_shutdown().await;
             release_lock();
             process::exit(0);
         }

@@ -1,24 +1,20 @@
-use super::{reply, reply_embed_with_components, BotData};
+use super::{BotData, reply, reply_embed_with_components};
 use serenity::all::*;
 use std::sync::Arc;
 
 pub fn register() -> CreateCommand {
     CreateCommand::new("queue")
         .description("View or manage the message queue")
-        .add_option(
-            CreateCommandOption::new(
-                CommandOptionType::SubCommand,
-                "list",
-                "Show queued messages",
-            ),
-        )
-        .add_option(
-            CreateCommandOption::new(
-                CommandOptionType::SubCommand,
-                "clear",
-                "Clear all queued messages",
-            ),
-        )
+        .add_option(CreateCommandOption::new(
+            CommandOptionType::SubCommand,
+            "list",
+            "Show queued messages",
+        ))
+        .add_option(CreateCommandOption::new(
+            CommandOptionType::SubCommand,
+            "clear",
+            "Clear all queued messages",
+        ))
 }
 
 pub async fn run(

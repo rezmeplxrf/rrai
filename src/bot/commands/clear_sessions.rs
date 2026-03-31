@@ -20,7 +20,9 @@ pub async fn run(
 
     // Stop any active session first
     data.session_manager.stop_session(&channel_id_str).await;
-    data.db.clear_session(&channel_id_str);
+    if let Err(e) = data.db.clear_session(&channel_id_str) {
+        tracing::warn!("Failed to clear session: {e}");
+    }
 
     let session_dir = match find_session_dir(&project.project_path) {
         Some(d) => d,

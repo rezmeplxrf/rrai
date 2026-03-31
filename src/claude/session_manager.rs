@@ -91,11 +91,13 @@ impl SessionManager {
                 let project_path =
                     config.sessions_dir().join(&channel_id_str);
                 std::fs::create_dir_all(&project_path).ok();
-                self.db.register_project(
+                if let Err(e) = self.db.register_project(
                     &channel_id_str,
                     &project_path.to_string_lossy(),
                     &guild_id.to_string(),
-                );
+                ) {
+                    warn!("Failed to register project: {e}");
+                }
                 self.db.get_project(&channel_id_str).unwrap()
             }
         };
@@ -110,7 +112,9 @@ impl SessionManager {
                 // #30: If stale session, clear and retry
                 if e.contains("No conversation found with session ID") {
                     warn!("[session] Stale session for {channel_id_str}, clearing and retrying fresh");
-                    self.db.clear_session(&channel_id_str);
+                    if let Err(e) = self.db.clear_session(&channel_id_str) {
+                        warn!("Failed to clear session: {e}");
+                    }
                     self.cleanup_session_internal(&channel_id_str).await;
                     return self.send_message(channel_id, guild_id, prompt).await;
                 }
@@ -194,12 +198,14 @@ impl SessionManager {
                     {
                         let mut session = session_arc.lock().await;
                         session.session_id = Some(sid.clone());
-                        self.db.upsert_session(
+                        if let Err(e) = self.db.upsert_session(
                             &session.db_id,
                             &channel_id_str,
                             Some(&sid),
                             SessionStatus::Idle,
-                        );
+                        ) {
+                            warn!("Failed to upsert session: {e}");
+                        }
 
                         // Apply per-channel disabled MCPs
                         let disabled = self.db.get_disabled_mcps(&channel_id_str);
@@ -486,9 +492,9 @@ impl SessionManager {
         let db_session = self.db.get_session(&channel_id_str);
         let db_id = db_session
             .as_ref()
-            .map(|s| s.id.clone())
+            .map(|s| s.db_id.clone())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let resume_session_id = db_session.and_then(|s| s.session_id);
+        let resume_session_id = db_session.and_then(|s| s.claude_session_id);
 
         let model = self.db.get_model(&channel_id_str);
         let project_path_buf = PathBuf::from(project_path);
@@ -516,12 +522,14 @@ impl SessionManager {
             busy: false,
         };
 
-        self.db.upsert_session(
+        if let Err(e) = self.db.upsert_session(
             &db_id,
             &channel_id_str,
             session.session_id.as_deref(),
             SessionStatus::Idle,
-        );
+        ) {
+            warn!("Failed to upsert session: {e}");
+        }
 
         let arc = Arc::new(tokio::sync::Mutex::new(session));
         self.sessions
@@ -582,13 +590,17 @@ impl SessionManager {
         let disabled = self.db.get_disabled_mcps(channel_id_str);
         if enabled {
             let updated: Vec<String> = disabled.into_iter().filter(|n| n != server_name).collect();
-            self.db.set_disabled_mcps(channel_id_str, &updated);
+            if let Err(e) = self.db.set_disabled_mcps(channel_id_str, &updated) {
+                warn!("Failed to update disabled MCPs: {e}");
+            }
         } else {
             let mut updated = disabled;
             if !updated.contains(&server_name.to_string()) {
                 updated.push(server_name.to_string());
             }
-            self.db.set_disabled_mcps(channel_id_str, &updated);
+            if let Err(e) = self.db.set_disabled_mcps(channel_id_str, &updated) {
+                warn!("Failed to update disabled MCPs: {e}");
+            }
         }
     }
 
@@ -792,8 +804,10 @@ impl SessionManager {
     pub fn resolve_approval(&self, request_id: &str, decision: &str) -> bool {
         let mut approvals = self.pending_approvals.lock();
         if let Some(pending) = approvals.remove(request_id) {
-            if decision == "approve-all" {
-                self.db.set_auto_approve(&pending.channel_id, true);
+            if decision == "approve-all"
+                && let Err(e) = self.db.set_auto_approve(&pending.channel_id, true)
+            {
+                warn!("Failed to set auto_approve: {e}");
             }
             let behavior = if decision == "deny" { "deny" } else { "allow" };
             let message = if decision == "deny" {
@@ -887,7 +901,9 @@ impl SessionManager {
             .get_session(channel_id)
             .map(|s| s.status)
             .unwrap_or(SessionStatus::Offline);
-        self.db.update_session_status(channel_id, status);
+        if let Err(e) = self.db.update_session_status(channel_id, status) {
+            warn!("Failed to update session status: {e}");
+        }
         if old != status {
             self.notify_status_change(channel_id, old, status);
         }

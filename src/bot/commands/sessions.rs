@@ -74,7 +74,7 @@ pub async fn run(
     ];
 
     let current_session = data.db.get_session(&channel_id_str);
-    let current_sid = current_session.and_then(|s| s.session_id);
+    let current_sid = current_session.and_then(|s| s.claude_session_id);
 
     for (sid, modified, first_msg) in &session_files {
         let elapsed = modified

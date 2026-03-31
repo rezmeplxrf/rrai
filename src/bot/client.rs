@@ -186,7 +186,9 @@ async fn cleanup_orphaned_projects(db: &Database, http: &Http, guild_id: GuildId
             Ok(_) => {} // Channel exists
             Err(_) => {
                 cleanup_project_files(&project.project_path);
-                db.unregister_project(&project.channel_id);
+                if let Err(e) = db.unregister_project(&project.channel_id) {
+                    error!("Failed to unregister project {}: {e}", project.channel_id);
+                }
                 cleaned += 1;
             }
         }

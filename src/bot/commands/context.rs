@@ -33,7 +33,7 @@ pub async fn run(
     let session_info = match &session {
         Some(s) => {
             let status = s.status.as_str();
-            let sid = s.session_id.as_deref().unwrap_or("none");
+            let sid = s.claude_session_id.as_deref().unwrap_or("none");
             format!(
                 "**Session:** `{}...` ({})",
                 &sid[..8.min(sid.len())],

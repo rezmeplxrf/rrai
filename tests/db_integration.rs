@@ -16,7 +16,7 @@ fn temp_db() -> Database {
 #[test]
 fn register_and_retrieve_project() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/project1", "guild-1");
+    db.register_project("ch-1", "/tmp/project1", "guild-1").unwrap();
 
     let project = db.get_project("ch-1").expect("project should exist");
     assert_eq!(project.channel_id, "ch-1");
@@ -34,8 +34,8 @@ fn get_nonexistent_project_returns_none() {
 #[test]
 fn register_project_upserts_on_conflict() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/old", "guild-1");
-    db.register_project("ch-1", "/tmp/new", "guild-1");
+    db.register_project("ch-1", "/tmp/old", "guild-1").unwrap();
+    db.register_project("ch-1", "/tmp/new", "guild-1").unwrap();
 
     let project = db.get_project("ch-1").unwrap();
     assert_eq!(project.project_path, "/tmp/new");
@@ -44,10 +44,10 @@ fn register_project_upserts_on_conflict() {
 #[test]
 fn unregister_project_removes_project_and_sessions() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
-    db.upsert_session("s-1", "ch-1", Some("sid-1"), SessionStatus::Idle);
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", Some("sid-1"), SessionStatus::Idle).unwrap();
 
-    db.unregister_project("ch-1");
+    db.unregister_project("ch-1").unwrap();
 
     assert!(db.get_project("ch-1").is_none());
     assert!(db.get_session("ch-1").is_none());
@@ -56,9 +56,9 @@ fn unregister_project_removes_project_and_sessions() {
 #[test]
 fn get_all_projects_filters_by_guild() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/a", "guild-1");
-    db.register_project("ch-2", "/tmp/b", "guild-1");
-    db.register_project("ch-3", "/tmp/c", "guild-2");
+    db.register_project("ch-1", "/tmp/a", "guild-1").unwrap();
+    db.register_project("ch-2", "/tmp/b", "guild-1").unwrap();
+    db.register_project("ch-3", "/tmp/c", "guild-2").unwrap();
 
     let guild1 = db.get_all_projects("guild-1");
     assert_eq!(guild1.len(), 2);
@@ -75,14 +75,14 @@ fn get_all_projects_filters_by_guild() {
 #[test]
 fn set_auto_approve_toggles_flag() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
 
     assert!(!db.get_project("ch-1").unwrap().auto_approve);
 
-    db.set_auto_approve("ch-1", true);
+    db.set_auto_approve("ch-1", true).unwrap();
     assert!(db.get_project("ch-1").unwrap().auto_approve);
 
-    db.set_auto_approve("ch-1", false);
+    db.set_auto_approve("ch-1", false).unwrap();
     assert!(!db.get_project("ch-1").unwrap().auto_approve);
 }
 
@@ -91,36 +91,36 @@ fn set_auto_approve_toggles_flag() {
 #[test]
 fn upsert_and_retrieve_session() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
-    db.upsert_session("s-1", "ch-1", Some("claude-sess-1"), SessionStatus::Online);
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", Some("claude-sess-1"), SessionStatus::Online).unwrap();
 
     let session = db.get_session("ch-1").expect("session should exist");
-    assert_eq!(session.id, "s-1");
-    assert_eq!(session.session_id, Some("claude-sess-1".to_string()));
+    assert_eq!(session.db_id, "s-1");
+    assert_eq!(session.claude_session_id, Some("claude-sess-1".to_string()));
     assert_eq!(session.status, SessionStatus::Online);
 }
 
 #[test]
 fn upsert_session_replaces_by_id() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Offline);
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Offline).unwrap();
     // Upsert with same id updates in place
-    db.upsert_session("s-1", "ch-1", Some("sid"), SessionStatus::Idle);
+    db.upsert_session("s-1", "ch-1", Some("sid"), SessionStatus::Idle).unwrap();
 
     let session = db.get_session("ch-1").unwrap();
-    assert_eq!(session.id, "s-1");
-    assert_eq!(session.session_id, Some("sid".to_string()));
+    assert_eq!(session.db_id, "s-1");
+    assert_eq!(session.claude_session_id, Some("sid".to_string()));
     assert_eq!(session.status, SessionStatus::Idle);
 }
 
 #[test]
 fn update_session_status() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online);
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
 
-    db.update_session_status("ch-1", SessionStatus::Waiting);
+    db.update_session_status("ch-1", SessionStatus::Waiting).unwrap();
 
     let session = db.get_session("ch-1").unwrap();
     assert_eq!(session.status, SessionStatus::Waiting);
@@ -129,21 +129,21 @@ fn update_session_status() {
 #[test]
 fn clear_session_removes_all_for_channel() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online);
-    db.upsert_session("s-2", "ch-1", None, SessionStatus::Idle);
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
+    db.upsert_session("s-2", "ch-1", None, SessionStatus::Idle).unwrap();
 
-    db.clear_session("ch-1");
+    db.clear_session("ch-1").unwrap();
     assert!(db.get_session("ch-1").is_none());
 }
 
 #[test]
 fn get_all_sessions_joins_project() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/a", "guild-1");
-    db.register_project("ch-2", "/tmp/b", "guild-1");
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online);
-    db.upsert_session("s-2", "ch-2", None, SessionStatus::Idle);
+    db.register_project("ch-1", "/tmp/a", "guild-1").unwrap();
+    db.register_project("ch-2", "/tmp/b", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
+    db.upsert_session("s-2", "ch-2", None, SessionStatus::Idle).unwrap();
 
     let sessions = db.get_all_sessions("guild-1");
     assert_eq!(sessions.len(), 2);
@@ -164,14 +164,14 @@ fn get_all_sessions_empty_guild() {
 #[test]
 fn set_and_get_model() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
 
     assert!(db.get_model("ch-1").is_none());
 
-    db.set_model("ch-1", Some("claude-sonnet-4-6"));
+    db.set_model("ch-1", Some("claude-sonnet-4-6")).unwrap();
     assert_eq!(db.get_model("ch-1").unwrap(), "claude-sonnet-4-6");
 
-    db.set_model("ch-1", None);
+    db.set_model("ch-1", None).unwrap();
     assert!(db.get_model("ch-1").is_none());
 }
 
@@ -186,17 +186,17 @@ fn get_model_nonexistent_channel() {
 #[test]
 fn disabled_mcps_default_empty() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
     assert!(db.get_disabled_mcps("ch-1").is_empty());
 }
 
 #[test]
 fn set_and_get_disabled_mcps() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
 
     let mcps = vec!["server-a".to_string(), "server-b".to_string()];
-    db.set_disabled_mcps("ch-1", &mcps);
+    db.set_disabled_mcps("ch-1", &mcps).unwrap();
 
     let result = db.get_disabled_mcps("ch-1");
     assert_eq!(result, mcps);
@@ -205,12 +205,12 @@ fn set_and_get_disabled_mcps() {
 #[test]
 fn set_disabled_mcps_empty_clears() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
 
-    db.set_disabled_mcps("ch-1", &["x".to_string()]);
+    db.set_disabled_mcps("ch-1", &["x".to_string()]).unwrap();
     assert_eq!(db.get_disabled_mcps("ch-1").len(), 1);
 
-    db.set_disabled_mcps("ch-1", &[]);
+    db.set_disabled_mcps("ch-1", &[]).unwrap();
     assert!(db.get_disabled_mcps("ch-1").is_empty());
 }
 
@@ -225,12 +225,10 @@ fn get_disabled_mcps_nonexistent_channel() {
 #[test]
 fn deleting_project_cascades_to_sessions() {
     let db = temp_db();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
-    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online);
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
+    db.upsert_session("s-1", "ch-1", None, SessionStatus::Online).unwrap();
 
-    // Use unregister which manually deletes both, but also verify the cascade
-    // by directly checking sessions remain absent
-    db.unregister_project("ch-1");
+    db.unregister_project("ch-1").unwrap();
     assert!(db.get_session("ch-1").is_none());
 }
 
@@ -241,7 +239,7 @@ fn database_is_clone_safe() {
     let db = temp_db();
     let db2 = db.clone();
 
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
     let project = db2.get_project("ch-1");
     assert!(project.is_some());
 }

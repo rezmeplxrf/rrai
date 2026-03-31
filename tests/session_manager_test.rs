@@ -260,7 +260,7 @@ async fn mock_send_error() {
 #[tokio::test]
 async fn toggle_mcp_persists_disabled_list() {
     let (sm, _, db) = setup();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
 
     // toggle_mcp_server calls sdk_control (which needs an active session),
     // but the DB persist part runs unconditionally
@@ -277,7 +277,7 @@ async fn toggle_mcp_persists_disabled_list() {
 #[tokio::test]
 async fn toggle_mcp_no_duplicates() {
     let (sm, _, db) = setup();
-    db.register_project("ch-1", "/tmp/p", "guild-1");
+    db.register_project("ch-1", "/tmp/p", "guild-1").unwrap();
 
     sm.toggle_mcp_server("ch-1", "s", false).await;
     sm.toggle_mcp_server("ch-1", "s", false).await;

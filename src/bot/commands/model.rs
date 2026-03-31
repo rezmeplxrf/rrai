@@ -35,13 +35,17 @@ pub async fn run(
 
     match model_name {
         Some(name) if name == "reset" || name == "default" => {
-            data.db.set_model(&channel_id_str, None);
+            if let Err(e) = data.db.set_model(&channel_id_str, None) {
+                tracing::warn!("Failed to reset model: {e}");
+            }
             // Restart session with new model
             data.session_manager.stop_session(&channel_id_str).await;
             reply(ctx, cmd, "🔄 Model reset to default. Session restarted.").await
         }
         Some(name) => {
-            data.db.set_model(&channel_id_str, Some(&name));
+            if let Err(e) = data.db.set_model(&channel_id_str, Some(&name)) {
+                tracing::warn!("Failed to set model: {e}");
+            }
             // Restart session with new model
             data.session_manager.stop_session(&channel_id_str).await;
             reply(

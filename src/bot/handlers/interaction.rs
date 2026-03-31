@@ -115,12 +115,14 @@ pub async fn handle_button_interaction(
             let session_id = request_id;
             let channel_id = interaction.channel_id.to_string();
             session_manager.stop_session(&channel_id).await;
-            db.upsert_session(
+            if let Err(e) = db.upsert_session(
                 &Uuid::new_v4().to_string(),
                 &channel_id,
                 Some(session_id),
                 SessionStatus::Idle,
-            );
+            ) {
+                tracing::warn!("Failed to upsert session: {e}");
+            }
             let embed = CreateEmbed::new()
                 .title("Session Resumed")
                 .description(format!(
@@ -166,14 +168,15 @@ pub async fn handle_button_interaction(
                         Ok(_) => {
                             // If deleting the active session, reset DB
                             if let Some(db_session) = db.get_session(&channel_id_str)
-                                && db_session.session_id.as_deref() == Some(session_id)
-                            {
-                                db.upsert_session(
+                                && db_session.claude_session_id.as_deref() == Some(session_id)
+                                && let Err(e) = db.upsert_session(
                                     &Uuid::new_v4().to_string(),
                                     &channel_id_str,
                                     None,
                                     SessionStatus::Idle,
-                                );
+                                )
+                            {
+                                tracing::warn!("Failed to upsert session: {e}");
                             }
                             let embed = CreateEmbed::new()
                                 .title("Session Deleted")
@@ -494,12 +497,14 @@ pub async fn handle_select_menu_interaction(
         if selected == "__new_session__" {
             let channel_id_str = interaction.channel_id.to_string();
             session_manager.stop_session(&channel_id_str).await;
-            db.upsert_session(
+            if let Err(e) = db.upsert_session(
                 &Uuid::new_v4().to_string(),
                 &channel_id_str,
                 None,
                 SessionStatus::Idle,
-            );
+            ) {
+                tracing::warn!("Failed to upsert session: {e}");
+            }
 
             let embed = CreateEmbed::new()
                 .title("✨ New Session")

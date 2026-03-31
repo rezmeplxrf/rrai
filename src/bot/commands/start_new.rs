@@ -93,17 +93,21 @@ pub async fn run(
     let config = crate::config::get_config();
     let project_path = config.sessions_dir().join(channel.id.to_string());
     std::fs::create_dir_all(&project_path).ok();
-    data.db.register_project(
+    if let Err(e) = data.db.register_project(
         &channel.id.to_string(),
         &project_path.to_string_lossy(),
         &guild_id.to_string(),
-    );
-    data.db.upsert_session(
+    ) {
+        warn!("Failed to register project: {e}");
+    }
+    if let Err(e) = data.db.upsert_session(
         &Uuid::new_v4().to_string(),
         &channel.id.to_string(),
         None,
         SessionStatus::Idle,
-    );
+    ) {
+        warn!("Failed to upsert session: {e}");
+    }
 
     reply(
         ctx,

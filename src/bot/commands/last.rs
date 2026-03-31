@@ -25,7 +25,7 @@ pub async fn run(
         None => return reply(ctx, cmd, "No active session.").await,
     };
 
-    let session_id = match &session.session_id {
+    let session_id = match &session.claude_session_id {
         Some(s) => s,
         None => return reply(ctx, cmd, "No session history available.").await,
     };

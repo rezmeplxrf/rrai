@@ -106,6 +106,9 @@ Discord-based Claude Code agent controller. Each Discord channel runs an isolate
 - **Projects** — channel-to-workspace mapping, model, auto-approve, disabled MCPs
 - **Sessions** — session IDs, status tracking (Online/Offline/Waiting/Idle), last activity
 - WAL mode with foreign key constraints
+- Schema migration system via `PRAGMA user_version`
+- Indexed lookups on `channel_id` and `guild_id`
+- CHECK constraints on status values
 
 ### Cleanup & Maintenance
 

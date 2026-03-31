@@ -43,11 +43,15 @@ pub async fn run(
                 // No active session — just update DB
                 if currently_disabled {
                     let updated: Vec<String> = disabled.into_iter().filter(|n| n != &name).collect();
-                    data.db.set_disabled_mcps(&channel_id_str, &updated);
+                    if let Err(e) = data.db.set_disabled_mcps(&channel_id_str, &updated) {
+                        tracing::warn!("Failed to update disabled MCPs: {e}");
+                    }
                 } else {
                     let mut updated = disabled;
                     updated.push(name.clone());
-                    data.db.set_disabled_mcps(&channel_id_str, &updated);
+                    if let Err(e) = data.db.set_disabled_mcps(&channel_id_str, &updated) {
+                        tracing::warn!("Failed to update disabled MCPs: {e}");
+                    }
                 }
             }
 

@@ -31,7 +31,9 @@ pub async fn run(
 
     let channel_id_str = cmd.channel_id.to_string();
     let enable = mode == "on";
-    data.db.set_auto_approve(&channel_id_str, enable);
+    if let Err(e) = data.db.set_auto_approve(&channel_id_str, enable) {
+        tracing::warn!("Failed to set auto_approve: {e}");
+    }
 
     if enable {
         reply(ctx, cmd, "⚡ Auto-approve **enabled** for this channel. All tool uses will be automatically approved.").await

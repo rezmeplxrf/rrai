@@ -46,9 +46,9 @@ pub struct Project {
 
 #[derive(Debug, Clone)]
 pub struct Session {
-    pub id: String,
+    pub db_id: String,
     pub channel_id: String,
-    pub session_id: Option<String>,
+    pub claude_session_id: Option<String>,
     pub status: SessionStatus,
     pub last_activity: Option<String>,
     pub created_at: String,

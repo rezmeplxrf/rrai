@@ -11,7 +11,11 @@ pub fn register() -> CreateCommand {
                 "name",
                 "Model name (leave empty to view current)",
             )
-            .required(false),
+            .required(false)
+            .add_string_choice("Opus (latest)", "opus")
+            .add_string_choice("Sonnet (latest)", "sonnet")
+            .add_string_choice("Haiku (latest)", "haiku")
+            .add_string_choice("Default", "default"),
         )
 }
 

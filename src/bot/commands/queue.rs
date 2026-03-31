@@ -7,13 +7,17 @@ pub fn register() -> CreateCommand {
         .description("View or manage the message queue")
         .add_option(
             CreateCommandOption::new(
-                CommandOptionType::String,
-                "action",
-                "Action to perform",
-            )
-            .required(true)
-            .add_string_choice("list", "list")
-            .add_string_choice("clear", "clear"),
+                CommandOptionType::SubCommand,
+                "list",
+                "Show queued messages",
+            ),
+        )
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "clear",
+                "Clear all queued messages",
+            ),
         )
 }
 
@@ -26,7 +30,7 @@ pub async fn run(
         .data
         .options
         .first()
-        .and_then(|o| o.value.as_str())
+        .map(|o| o.name.as_str())
         .unwrap_or("list");
 
     let channel_id_str = cmd.channel_id.to_string();

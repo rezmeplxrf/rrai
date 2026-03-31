@@ -613,17 +613,39 @@ pub fn find_session_dir(project_path: &str) -> Option<std::path::PathBuf> {
         return Some(dir2);
     }
 
-    // Search for a matching directory by reading JSONL files for cwd field
+    // Fallback: scan directories, try decoding names and reading JSONL cwd fields
     if let Ok(entries) = std::fs::read_dir(&projects_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             if !entry.path().is_dir() {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            // Decode percent-encoding
+            // Try percent-decoding
             let decoded = name.replace("%2F", "/");
             if decoded == canonical_str.as_ref() {
                 return Some(entry.path());
+            }
+
+            // Try reading a JSONL file's cwd field as final fallback
+            if let Ok(files) = std::fs::read_dir(entry.path()) {
+                for file in files.filter_map(|f| f.ok()) {
+                    if !file.file_name().to_string_lossy().ends_with(".jsonl") {
+                        continue;
+                    }
+                    if let Ok(content) = std::fs::read_to_string(file.path()) {
+                        if let Some(first_line) = content.lines().next() {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(first_line)
+                            {
+                                if let Some(cwd) = val.get("cwd").and_then(|c| c.as_str()) {
+                                    if cwd == canonical_str.as_ref() {
+                                        return Some(entry.path());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break; // Only check the first JSONL file
+                }
             }
         }
     }
@@ -632,28 +654,48 @@ pub fn find_session_dir(project_path: &str) -> Option<std::path::PathBuf> {
 }
 
 /// Read the last assistant message from a JSONL session file.
+/// Concatenates ALL text blocks in the last assistant message (not just the first).
+/// Handles both flat `{type:"assistant", content:[...]}` and nested
+/// `{type:"assistant", message:{content:[...]}}` JSONL formats.
 pub fn get_last_assistant_message(file_path: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(file_path).ok()?;
-    let mut last_text = None;
 
     for line in content.lines().rev() {
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                if let Some(content) = val.get("content").and_then(|c| c.as_array()) {
-                    for block in content {
-                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                            if !text.is_empty() {
-                                last_text = Some(text.to_string());
-                                return last_text;
+            if val.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+                continue;
+            }
+            // Try flat format: content at top level
+            // Then nested format: message.content
+            let content_arr = val
+                .get("content")
+                .and_then(|c| c.as_array())
+                .or_else(|| {
+                    val.get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_array())
+                });
+
+            if let Some(blocks) = content_arr {
+                let mut full_text = String::new();
+                for block in blocks {
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                        if !text.is_empty() {
+                            if !full_text.is_empty() {
+                                full_text.push('\n');
                             }
+                            full_text.push_str(text);
                         }
                     }
+                }
+                if !full_text.is_empty() {
+                    return Some(full_text);
                 }
             }
         }
     }
 
-    last_text
+    None
 }
 
 /// #24: Resolve select menu value indices to their display labels.

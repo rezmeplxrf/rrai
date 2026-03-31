@@ -116,7 +116,7 @@ pub enum SdkCommand {
 /// A running Claude CLI session.
 pub struct ClaudeProcess {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     pub message_rx: mpsc::UnboundedReceiver<SdkMessage>,
     _reader_handle: tokio::task::JoinHandle<()>,
 }
@@ -175,7 +175,7 @@ impl ClaudeProcess {
 
         Ok(Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             message_rx: rx,
             _reader_handle: reader_handle,
         })
@@ -247,16 +247,20 @@ impl ClaudeProcess {
     }
 
     async fn send_command(&mut self, cmd: &SdkCommand) -> Result<(), String> {
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "stdin closed".to_string())?;
         let json = serde_json::to_string(cmd).map_err(|e| format!("JSON serialize error: {e}"))?;
-        self.stdin
+        stdin
             .write_all(json.as_bytes())
             .await
             .map_err(|e| format!("Failed to write to claude stdin: {e}"))?;
-        self.stdin
+        stdin
             .write_all(b"\n")
             .await
             .map_err(|e| format!("Failed to write newline: {e}"))?;
-        self.stdin
+        stdin
             .flush()
             .await
             .map_err(|e| format!("Failed to flush stdin: {e}"))?;
@@ -265,8 +269,8 @@ impl ClaudeProcess {
 
     /// Close the subprocess.
     pub async fn close(&mut self) {
-        // Close stdin to signal EOF
-        drop(unsafe { std::ptr::read(&self.stdin) });
+        // Drop stdin to signal EOF (safe — Option::take)
+        self.stdin.take();
         // Try to kill if still running
         let _ = self.child.kill().await;
     }

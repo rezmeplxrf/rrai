@@ -1,3 +1,4 @@
+use crate::bot::handlers::interaction::find_session_dir;
 use std::fs;
 use std::path::Path;
 use tracing::warn;
@@ -12,22 +13,10 @@ pub fn cleanup_project_files(project_path: &str) {
         }
     }
 
-    // Remove session files from ~/.claude/projects/<encoded-path>/
-    let home = match dirs_next() {
-        Some(h) => h,
-        None => return,
-    };
-
-    // Claude Code encodes the project path as the directory name
-    let encoded = project_path.replace('/', "%2F");
-    let session_dir = home.join(".claude").join("projects").join(&encoded);
-    if session_dir.exists() {
+    // Remove session directory using the same lookup as find_session_dir
+    if let Some(session_dir) = find_session_dir(project_path) {
         if let Err(e) = fs::remove_dir_all(&session_dir) {
             warn!("Failed to remove session dir {}: {e}", session_dir.display());
         }
     }
-}
-
-fn dirs_next() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME").map(std::path::PathBuf::from)
 }

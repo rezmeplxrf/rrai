@@ -128,26 +128,29 @@ pub async fn run(
 }
 
 /// Read the first user message from a JSONL session file.
+/// Strips IDE-injected tags (e.g. `<ide_opened_file>...</ide_opened_file>`).
 fn read_first_user_message(file_path: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(file_path).ok()?;
     for line in content.lines() {
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            // Look for user messages
-            if val.get("type").and_then(|t| t.as_str()) == Some("user") {
-                if let Some(msg) = val.get("message") {
-                    // SDK format: message.content
-                    if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
-                        if !content.is_empty() {
-                            return Some(content.to_string());
-                        }
+            if val.get("type").and_then(|t| t.as_str()) != Some("user") {
+                continue;
+            }
+            if let Some(msg) = val.get("message") {
+                // SDK format: message.content (string)
+                if let Some(text) = msg.get("content").and_then(|c| c.as_str()) {
+                    let cleaned = strip_tags(text);
+                    if !cleaned.is_empty() {
+                        return Some(cleaned);
                     }
-                    // Array format
-                    if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
-                        for block in content {
-                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                                if !text.is_empty() {
-                                    return Some(text.to_string());
-                                }
+                }
+                // Array format: message.content[].text
+                if let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) {
+                    for block in blocks {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            let cleaned = strip_tags(text);
+                            if !cleaned.is_empty() {
+                                return Some(cleaned);
                             }
                         }
                     }
@@ -156,6 +159,18 @@ fn read_first_user_message(file_path: &std::path::Path) -> Option<String> {
         }
     }
     None
+}
+
+/// Strip XML-like tags injected by IDEs (e.g. `<ide_opened_file>...</ide_opened_file>`,
+/// `<system-reminder>...`). Matches TS: `raw.replace(/<[^>]+>[^<]*<\/[^>]+>/g, "").replace(/<[^>]+>/g, "").trim()`
+fn strip_tags(text: &str) -> String {
+    // First remove paired tags with content: <tag>content</tag>
+    let re_paired = regex::Regex::new(r"<[^>]+>[^<]*</[^>]+>").unwrap();
+    let result = re_paired.replace_all(text, "");
+    // Then remove remaining standalone tags: <tag>
+    let re_single = regex::Regex::new(r"<[^>]+>").unwrap();
+    let result = re_single.replace_all(&result, "");
+    result.trim().to_string()
 }
 
 fn format_elapsed(seconds: u64) -> String {

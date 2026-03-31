@@ -71,12 +71,22 @@ pub async fn run(
         }
     };
 
-    // Create a new text channel
+    // Get parent category from the source channel
+    let parent_id = ctx
+        .http
+        .get_channel(cmd.channel_id)
+        .await
+        .ok()
+        .and_then(|ch| ch.guild())
+        .and_then(|gc| gc.parent_id);
+
+    // Create a new text channel in the same category
+    let mut create = CreateChannel::new(&channel_name).kind(ChannelType::Text);
+    if let Some(pid) = parent_id {
+        create = create.category(pid);
+    }
     let channel = guild_id
-        .create_channel(
-            &ctx.http,
-            CreateChannel::new(&channel_name).kind(ChannelType::Text),
-        )
+        .create_channel(&ctx.http, create)
         .await
         .map_err(|e| format!("Failed to create channel: {e}"))?;
 

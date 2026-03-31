@@ -40,6 +40,10 @@ impl Config {
             .parse::<u32>()
             .map_err(|_| "RATE_LIMIT_PER_MINUTE must be a positive integer".to_string())?;
 
+        if rate_limit_per_minute == 0 {
+            return Err("RATE_LIMIT_PER_MINUTE must be greater than 0".to_string());
+        }
+
         Ok(Config {
             discord_bot_token: token,
             discord_guild_id: guild_id,

@@ -262,8 +262,11 @@ impl SessionManager {
                                 .await
                             {
                                 current_msg_id = new_msg.id;
-                                response_buffer.clear();
                             }
+                        }
+                        // Clear buffer only after all chunks sent
+                        if chunks.len() > 1 {
+                            response_buffer.clear();
                         }
                     }
                 }
@@ -292,10 +295,12 @@ impl SessionManager {
                     let file_hint = input
                         .get("file_path")
                         .and_then(|v| v.as_str())
-                        .and_then(|p| p.rsplit('/').next())
+                        .and_then(|p| p.rsplit(&['/', '\\'][..]).next())
                         .map(|f| format!(" `{f}`"))
                         .unwrap_or_default();
-                    last_activity = format!("{tool_label}{file_hint}");
+                    // Escape underscores in fallback tool names to prevent Discord italics
+                    let escaped_label = tool_label.replace('_', "\\_");
+                    last_activity = format!("{escaped_label}{file_hint}");
 
                     if !has_text_output {
                         let elapsed = start_time.elapsed().as_secs();

@@ -53,7 +53,7 @@ pub async fn handle_command(
         "stop" => stop::run(ctx, cmd, data).await,
         "auto-approve" => auto_approve::run(ctx, cmd, data).await,
         "sessions" => sessions::run(ctx, cmd, data).await,
-        "clear-sessions" => clear_sessions::run(ctx, cmd, data).await,
+        "clear" => clear_sessions::run(ctx, cmd, data).await,
         "last" => last::run(ctx, cmd, data).await,
         "queue" => queue::run(ctx, cmd, data).await,
         "usage" => usage::run(ctx, cmd, data).await,

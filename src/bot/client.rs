@@ -3,6 +3,7 @@ use crate::bot::handlers::{interaction, message};
 use crate::claude::session_manager::SessionManager;
 use crate::config::get_config;
 use crate::db::Database;
+use crate::discord::SerenityDiscordClient;
 use crate::security::is_allowed_user;
 use crate::utils::cleanup::cleanup_project_files;
 use serenity::all::*;
@@ -163,7 +164,8 @@ pub async fn start_bot(db: Database) -> Result<(), Box<dyn std::error::Error>> {
         | GatewayIntents::MESSAGE_CONTENT;
 
     let http = Arc::new(Http::new(&config.discord_bot_token));
-    let session_manager = SessionManager::new(db.clone(), http.clone());
+    let discord_client = Arc::new(SerenityDiscordClient::new(http.clone()));
+    let session_manager = SessionManager::new(db.clone(), discord_client);
 
     let data = Arc::new(BotData {
         db,

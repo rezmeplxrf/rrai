@@ -3,11 +3,11 @@ use crate::claude::sdk::{ClaudeProcess, ContentBlock, SdkMessage};
 use crate::config::get_config;
 use crate::db::types::SessionStatus;
 use crate::db::Database;
+use crate::discord::DiscordClient;
 use parking_lot::Mutex;
 use serenity::all::{
     ChannelId, CreateAttachment, CreateMessage, EditMessage, GuildId,
 };
-use serenity::http::Http;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -52,7 +52,7 @@ struct QueueItem {
 
 pub struct SessionManager {
     db: Database,
-    http: Arc<Http>,
+    discord: Arc<dyn DiscordClient>,
     sessions: RwLock<HashMap<String, Arc<tokio::sync::Mutex<ActiveSession>>>>,
     pending_approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
     pending_questions: Arc<Mutex<HashMap<String, PendingQuestion>>>,
@@ -62,10 +62,10 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    pub fn new(db: Database, http: Arc<Http>) -> Arc<Self> {
+    pub fn new(db: Database, discord: Arc<dyn DiscordClient>) -> Arc<Self> {
         Arc::new(Self {
             db,
-            http,
+            discord,
             sessions: RwLock::new(HashMap::new()),
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
             pending_questions: Arc::new(Mutex::new(HashMap::new())),
@@ -91,13 +91,8 @@ impl SessionManager {
         let project = match self.db.get_project(&channel_id_str) {
             Some(p) => p,
             None => {
-                let channel_name = match self.http.get_channel(channel_id).await {
-                    Ok(ch) => ch
-                        .guild()
-                        .map(|gc| gc.name.clone())
-                        .unwrap_or_else(|| channel_id_str.clone()),
-                    Err(_) => channel_id_str.clone(),
-                };
+                let channel_name = self.discord.get_channel_name(channel_id).await
+                    .unwrap_or_else(|| channel_id_str.clone());
                 let project_path =
                     Path::new(&config.base_project_dir).join(&channel_name);
                 std::fs::create_dir_all(&project_path).ok();
@@ -130,9 +125,9 @@ impl SessionManager {
 
         // Set up the "Thinking..." message with stop button
         let stop_row = create_stop_button(&channel_id_str);
-        let msg = channel_id
+        let msg = self.discord
             .send_message(
-                &self.http,
+                channel_id,
                 CreateMessage::new()
                     .content("⏳ Thinking...")
                     .components(vec![stop_row.clone()]),
@@ -140,7 +135,7 @@ impl SessionManager {
             .await
             .map_err(|e| format!("Failed to send thinking message: {e}"))?;
 
-        let msg_id = msg.id;
+        let msg_id = msg;
         let start_time = Instant::now();
 
         // Send the user message to the Claude process
@@ -176,8 +171,8 @@ impl SessionManager {
                             } else {
                                 format!("{elapsed}s")
                             };
-                            let _ = channel_id.edit_message(
-                                &self.http,
+                            let _ = self.discord.edit_message(
+                                channel_id,
                                 current_msg_id,
                                 EditMessage::new()
                                     .content(format!("⏳ {last_activity} ({time_str})"))
@@ -248,20 +243,20 @@ impl SessionManager {
                         last_edit_time = now;
                         let chunks = split_message(&response_buffer);
                         if let Some(first) = chunks.first() {
-                            let _ = channel_id
+                            let _ = self.discord
                                 .edit_message(
-                                    &self.http,
+                                    channel_id,
                                     current_msg_id,
                                     EditMessage::new().content(first).components(vec![]),
                                 )
                                 .await;
                         }
                         for chunk in chunks.iter().skip(1) {
-                            if let Ok(new_msg) = channel_id
-                                .send_message(&self.http, CreateMessage::new().content(chunk))
+                            if let Ok(new_id) = self.discord
+                                .send_message(channel_id, CreateMessage::new().content(chunk))
                                 .await
                             {
-                                current_msg_id = new_msg.id;
+                                current_msg_id = new_id;
                             }
                         }
                         // Clear buffer only after all chunks sent
@@ -309,9 +304,9 @@ impl SessionManager {
                         } else {
                             format!("{elapsed}s")
                         };
-                        let _ = channel_id
+                        let _ = self.discord
                             .edit_message(
-                                &self.http,
+                                channel_id,
                                 current_msg_id,
                                 EditMessage::new()
                                     .content(format!(
@@ -349,25 +344,25 @@ impl SessionManager {
                     if !response_buffer.is_empty() {
                         let chunks = split_message(&response_buffer);
                         if let Some(first) = chunks.first() {
-                            let _ = channel_id
+                            let _ = self.discord
                                 .edit_message(
-                                    &self.http,
+                                    channel_id,
                                     current_msg_id,
                                     EditMessage::new().content(first),
                                 )
                                 .await;
                         }
                         for chunk in chunks.iter().skip(1) {
-                            let _ = channel_id
-                                .send_message(&self.http, CreateMessage::new().content(chunk))
+                            let _ = self.discord
+                                .send_message(channel_id, CreateMessage::new().content(chunk))
                                 .await;
                         }
                     }
 
                     // Replace stop button with completed button
-                    let _ = channel_id
+                    let _ = self.discord
                         .edit_message(
-                            &self.http,
+                            channel_id,
                             current_msg_id,
                             EditMessage::new().components(vec![create_completed_button()]),
                         )
@@ -386,7 +381,7 @@ impl SessionManager {
                         create_msg =
                             create_msg.add_file(CreateAttachment::bytes(data, "result.txt"));
                     }
-                    let _ = channel_id.send_message(&self.http, create_msg).await;
+                    let _ = self.discord.send_message(channel_id, create_msg).await;
 
                     // Detect auth/credit errors
                     let lower_result = result_text.to_lowercase();
@@ -396,9 +391,9 @@ impl SessionManager {
                         "expired", "not logged in", "please run /login",
                     ];
                     if auth_keywords.iter().any(|kw| lower_result.contains(kw)) {
-                        let _ = channel_id
+                        let _ = self.discord
                             .send_message(
-                                &self.http,
+                                channel_id,
                                 CreateMessage::new().content(
                                     "🔑 Claude Code is not logged in. Please open a terminal on the host PC and run `claude login` to authenticate, then try again.",
                                 ),
@@ -470,8 +465,8 @@ impl SessionManager {
             );
         }
 
-        let _ = channel_id
-            .send_message(&self.http, CreateMessage::new().content(format!("❌ {err_msg}")))
+        let _ = self.discord
+            .send_message(channel_id, CreateMessage::new().content(format!("❌ {err_msg}")))
             .await;
 
         self.db
@@ -646,9 +641,9 @@ impl SessionManager {
         let (embed, row) = create_tool_approval_embed(tool_name, input, request_id);
         self.db
             .update_session_status(channel_id_str, SessionStatus::Waiting);
-        let _ = channel_id
+        let _ = self.discord
             .send_message(
-                &self.http,
+                channel_id,
                 CreateMessage::new().embed(embed).components(vec![row]),
             )
             .await;
@@ -716,9 +711,9 @@ impl SessionManager {
 
             self.db
                 .update_session_status(channel_id_str, SessionStatus::Waiting);
-            let _ = channel_id
+            let _ = self.discord
                 .send_message(
-                    &self.http,
+                    channel_id,
                     CreateMessage::new().embed(embed).components(components),
                 )
                 .await;
@@ -800,8 +795,8 @@ impl SessionManager {
         match tokio::fs::read(path).await {
             Ok(data) => {
                 let attachment = CreateAttachment::bytes(data, file_name);
-                let _ = channel_id
-                    .send_message(&self.http, CreateMessage::new().add_file(attachment))
+                let _ = self.discord
+                    .send_message(channel_id, CreateMessage::new().add_file(attachment))
                     .await;
                 ("allow".into(), None, None)
             }
@@ -888,8 +883,8 @@ impl SessionManager {
         self.sessions.read().await.contains_key(channel_id)
     }
 
-    pub fn http(&self) -> &Http {
-        &self.http
+    pub fn discord(&self) -> &dyn DiscordClient {
+        &*self.discord
     }
 
     fn cleanup_pending(&self, channel_id: &str) {
@@ -1018,9 +1013,8 @@ impl SessionManager {
         } else {
             format!("📨 Processing queued message...\n> {preview}")
         };
-        let _ = next
-            .channel_id
-            .send_message(&self.http, CreateMessage::new().content(msg))
+        let _ = self.discord
+            .send_message(next.channel_id, CreateMessage::new().content(msg))
             .await;
 
         let self_clone = self.clone();

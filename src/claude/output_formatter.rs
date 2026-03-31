@@ -327,3 +327,183 @@ fn truncate(s: &str, max: usize) -> &str {
         &s[..end]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- truncate ---
+
+    #[test]
+    fn truncate_short_string_unchanged() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_at_exact_limit() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        assert_eq!(truncate("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_respects_char_boundaries() {
+        // 'é' is 2 bytes — truncating at byte 1 should back up to 0
+        let s = "é";
+        let result = truncate(s, 1);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn truncate_multibyte_midpoint() {
+        // "aé" = 3 bytes; truncate at 2 should give "a" (backs up from middle of 'é')
+        assert_eq!(truncate("aé", 2), "a");
+    }
+
+    // --- format_tokens ---
+
+    #[test]
+    fn format_tokens_small() {
+        assert_eq!(format_tokens(0), "0");
+        assert_eq!(format_tokens(999), "999");
+    }
+
+    #[test]
+    fn format_tokens_thousands() {
+        assert_eq!(format_tokens(1_000), "1.0K");
+        assert_eq!(format_tokens(1_500), "1.5K");
+        assert_eq!(format_tokens(999_999), "1000.0K");
+    }
+
+    #[test]
+    fn format_tokens_millions() {
+        assert_eq!(format_tokens(1_000_000), "1.0M");
+        assert_eq!(format_tokens(2_500_000), "2.5M");
+    }
+
+    // --- format_stream_chunk ---
+
+    #[test]
+    fn format_stream_chunk_short_text() {
+        let text = "short message";
+        assert_eq!(format_stream_chunk(text), text);
+    }
+
+    #[test]
+    fn format_stream_chunk_truncates_long_text() {
+        let text = "a".repeat(2000);
+        let result = format_stream_chunk(&text);
+        assert!(result.contains("... (truncated)"));
+        assert!(result.len() < text.len() + 20);
+    }
+
+    #[test]
+    fn format_stream_chunk_exact_limit() {
+        let text = "a".repeat(MAX_DISCORD_LENGTH);
+        assert_eq!(format_stream_chunk(&text), text);
+    }
+
+    // --- split_message ---
+
+    #[test]
+    fn split_message_short_text_single_chunk() {
+        let chunks = split_message("hello world");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "hello world");
+    }
+
+    #[test]
+    fn split_message_empty_string() {
+        let chunks = split_message("");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn split_message_splits_at_newline() {
+        // Build a message that needs splitting, with a newline in the second half
+        let first_part = "a".repeat(1200);
+        let second_part = "b".repeat(1000);
+        let text = format!("{first_part}\n{second_part}");
+        let chunks = split_message(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], first_part);
+        assert_eq!(chunks[1], format!("\n{second_part}"));
+    }
+
+    #[test]
+    fn split_message_closes_open_code_blocks() {
+        let text = format!("```rust\n{}\n```", "x\n".repeat(1000));
+        let chunks = split_message(&text);
+        // First chunk should end with ``` to close the block
+        // Second chunk should start with ```rust to reopen it
+        assert!(chunks.len() >= 2);
+        assert!(chunks[0].ends_with("```"));
+        assert!(chunks[1].starts_with("```rust\n"));
+    }
+
+    #[test]
+    fn split_message_no_code_block_no_extra_fences() {
+        let text = "a\n".repeat(1500);
+        let chunks = split_message(&text);
+        assert!(chunks.len() >= 2);
+        // No code fences should be added
+        assert!(!chunks[0].ends_with("```"));
+    }
+
+    // --- create_result_embed ---
+
+    #[test]
+    fn create_result_embed_short_result_no_file() {
+        let (_, file) = create_result_embed("done", 1000, 500, 2500, Some(0.05));
+        assert!(file.is_none());
+    }
+
+    #[test]
+    fn create_result_embed_long_result_produces_file() {
+        let long_result = "x".repeat(5000);
+        let (_, file) = create_result_embed(&long_result, 1000, 500, 2500, None);
+        assert!(file.is_some());
+        assert_eq!(file.unwrap(), long_result.as_bytes());
+    }
+
+    // --- create_tool_approval_embed for different tool types ---
+
+    #[test]
+    fn tool_approval_embed_bash() {
+        let input = serde_json::json!({
+            "command": "ls -la",
+            "description": "List files"
+        });
+        let (embed, _row) = create_tool_approval_embed("Bash", &input, "req-1");
+        // Just verify it doesn't panic and produces an embed
+        let _ = embed;
+    }
+
+    #[test]
+    fn tool_approval_embed_edit() {
+        let input = serde_json::json!({
+            "file_path": "/tmp/test.rs",
+            "old_string": "foo",
+            "new_string": "bar"
+        });
+        let (embed, _row) = create_tool_approval_embed("Edit", &input, "req-2");
+        let _ = embed;
+    }
+
+    #[test]
+    fn tool_approval_embed_unknown_tool() {
+        let input = serde_json::json!({"key": "value"});
+        let (embed, _row) = create_tool_approval_embed("CustomTool", &input, "req-3");
+        let _ = embed;
+    }
+
+    #[test]
+    fn tool_approval_embed_empty_input() {
+        let input = serde_json::json!({});
+        let (embed, _row) = create_tool_approval_embed("SomeTool", &input, "req-4");
+        let _ = embed;
+    }
+}

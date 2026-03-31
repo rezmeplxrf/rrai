@@ -4,7 +4,7 @@ use serenity::all::*;
 use std::sync::Arc;
 
 pub fn register() -> CreateCommand {
-    CreateCommand::new("clear-sessions").description("Delete all session files for this project")
+    CreateCommand::new("clear").description("Delete all session files and messages for this project")
 }
 
 pub async fn run(

@@ -235,9 +235,9 @@ pub async fn handle_message(
     tokio::spawn(async move {
         if let Err(e) = sm.send_message(channel_id, guild_id, &prompt_owned).await {
             warn!("sendMessage error: {e}");
-            let _ = channel_id
+            let _ = sm.discord()
                 .send_message(
-                    &sm.http(),
+                    channel_id,
                     CreateMessage::new().content(format!("❌ {e}")),
                 )
                 .await;

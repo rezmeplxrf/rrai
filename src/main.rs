@@ -1,10 +1,3 @@
-mod bot;
-mod claude;
-mod config;
-mod db;
-mod security;
-mod utils;
-
 use std::fs;
 use std::path::PathBuf;
 use std::process;
@@ -69,7 +62,7 @@ async fn main() {
     info!("Starting RRAI — Rust Remote AI...");
 
     // Load and validate config
-    if let Err(e) = config::load_config() {
+    if let Err(e) = rrai::config::load_config() {
         error!("Configuration error: {e}");
         release_lock();
         process::exit(1);
@@ -80,7 +73,7 @@ async fn main() {
     let db_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("data.db");
-    let db = match db::Database::open(&db_path) {
+    let db = match rrai::db::Database::open(&db_path) {
         Ok(db) => db,
         Err(e) => {
             error!("Database error: {e}");
@@ -91,7 +84,7 @@ async fn main() {
     info!("Database initialized");
 
     // Start Discord bot
-    if let Err(e) = bot::client::start_bot(db).await {
+    if let Err(e) = rrai::bot::client::start_bot(db).await {
         error!("Fatal error: {e}");
         release_lock();
         process::exit(1);

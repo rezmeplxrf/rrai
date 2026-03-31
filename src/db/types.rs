@@ -59,3 +59,66 @@ pub struct SessionWithProject {
     pub session: Session,
     pub project_path: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_status_roundtrip() {
+        for status in [
+            SessionStatus::Online,
+            SessionStatus::Offline,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+        ] {
+            let s = status.as_str();
+            let parsed = SessionStatus::from_str(s);
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn session_status_as_str() {
+        assert_eq!(SessionStatus::Online.as_str(), "online");
+        assert_eq!(SessionStatus::Offline.as_str(), "offline");
+        assert_eq!(SessionStatus::Waiting.as_str(), "waiting");
+        assert_eq!(SessionStatus::Idle.as_str(), "idle");
+    }
+
+    #[test]
+    fn session_status_unknown_defaults_to_offline() {
+        assert_eq!(SessionStatus::from_str("garbage"), SessionStatus::Offline);
+        assert_eq!(SessionStatus::from_str(""), SessionStatus::Offline);
+        assert_eq!(SessionStatus::from_str("ONLINE"), SessionStatus::Offline);
+    }
+
+    #[test]
+    fn session_status_display() {
+        assert_eq!(format!("{}", SessionStatus::Online), "online");
+        assert_eq!(format!("{}", SessionStatus::Idle), "idle");
+    }
+
+    #[test]
+    fn session_status_serde_roundtrip() {
+        let status = SessionStatus::Waiting;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"waiting\"");
+        let parsed: SessionStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    #[test]
+    fn session_status_serde_all_variants() {
+        for status in [
+            SessionStatus::Online,
+            SessionStatus::Offline,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let parsed: SessionStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, status);
+        }
+    }
+}

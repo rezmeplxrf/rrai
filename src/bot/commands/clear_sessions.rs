@@ -30,10 +30,10 @@ pub async fn run(
     let mut count = 0;
     if let Ok(entries) = std::fs::read_dir(&session_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
-            if entry.file_name().to_string_lossy().ends_with(".jsonl") {
-                if std::fs::remove_file(entry.path()).is_ok() {
-                    count += 1;
-                }
+            if entry.file_name().to_string_lossy().ends_with(".jsonl")
+                && std::fs::remove_file(entry.path()).is_ok()
+            {
+                count += 1;
             }
         }
     }

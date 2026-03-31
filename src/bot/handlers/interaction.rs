@@ -165,15 +165,15 @@ pub async fn handle_button_interaction(
                     match std::fs::remove_file(&file_path) {
                         Ok(_) => {
                             // If deleting the active session, reset DB
-                            if let Some(db_session) = db.get_session(&channel_id_str) {
-                                if db_session.session_id.as_deref() == Some(session_id) {
-                                    db.upsert_session(
-                                        &Uuid::new_v4().to_string(),
-                                        &channel_id_str,
-                                        None,
-                                        SessionStatus::Idle,
-                                    );
-                                }
+                            if let Some(db_session) = db.get_session(&channel_id_str)
+                                && db_session.session_id.as_deref() == Some(session_id)
+                            {
+                                db.upsert_session(
+                                    &Uuid::new_v4().to_string(),
+                                    &channel_id_str,
+                                    None,
+                                    SessionStatus::Idle,
+                                );
                             }
                             let embed = CreateEmbed::new()
                                 .title("Session Deleted")
@@ -220,7 +220,7 @@ pub async fn handle_button_interaction(
                 .data
                 .custom_id
                 .split(':')
-                .last()
+                .next_back()
                 .unwrap_or("Unknown");
 
             // Try to get label from message components
@@ -528,11 +528,11 @@ pub async fn handle_select_menu_interaction(
         let channel_id_str = interaction.channel_id.to_string();
         let project = db.get_project(&channel_id_str);
         let mut last_message = String::new();
-        if let Some(project) = &project {
-            if let Some(dir) = find_session_dir(&project.project_path) {
-                let file_path = dir.join(format!("{selected}.jsonl"));
-                last_message = get_last_assistant_message(&file_path).unwrap_or_default();
-            }
+        if let Some(project) = &project
+            && let Some(dir) = find_session_dir(&project.project_path)
+        {
+            let file_path = dir.join(format!("{selected}.jsonl"));
+            last_message = get_last_assistant_message(&file_path).unwrap_or_default();
         }
 
         let row = CreateActionRow::Buttons(vec![
@@ -632,17 +632,13 @@ pub fn find_session_dir(project_path: &str) -> Option<std::path::PathBuf> {
                     if !file.file_name().to_string_lossy().ends_with(".jsonl") {
                         continue;
                     }
-                    if let Ok(content) = std::fs::read_to_string(file.path()) {
-                        if let Some(first_line) = content.lines().next() {
-                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(first_line)
-                            {
-                                if let Some(cwd) = val.get("cwd").and_then(|c| c.as_str()) {
-                                    if cwd == canonical_str.as_ref() {
-                                        return Some(entry.path());
-                                    }
-                                }
-                            }
-                        }
+                    if let Ok(content) = std::fs::read_to_string(file.path())
+                        && let Some(first_line) = content.lines().next()
+                        && let Ok(val) = serde_json::from_str::<serde_json::Value>(first_line)
+                        && let Some(cwd) = val.get("cwd").and_then(|c| c.as_str())
+                        && cwd == canonical_str.as_ref()
+                    {
+                        return Some(entry.path());
                     }
                     break; // Only check the first JSONL file
                 }
@@ -679,13 +675,13 @@ pub fn get_last_assistant_message(file_path: &std::path::Path) -> Option<String>
             if let Some(blocks) = content_arr {
                 let mut full_text = String::new();
                 for block in blocks {
-                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                        if !text.is_empty() {
-                            if !full_text.is_empty() {
-                                full_text.push('\n');
-                            }
-                            full_text.push_str(text);
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str())
+                        && !text.is_empty()
+                    {
+                        if !full_text.is_empty() {
+                            full_text.push('\n');
                         }
+                        full_text.push_str(text);
                     }
                 }
                 if !full_text.is_empty() {
@@ -726,16 +722,14 @@ fn resolve_select_labels(interaction: &ComponentInteraction, values: &[String]) 
 fn get_button_label(interaction: &ComponentInteraction, custom_id: &str) -> Option<String> {
     for row in &interaction.message.components {
         for component in &row.components {
-            if let serenity::model::application::ActionRowComponent::Button(btn) = component {
-                if let serenity::model::application::ButtonKind::NonLink {
+            if let serenity::model::application::ActionRowComponent::Button(btn) = component
+                && let serenity::model::application::ButtonKind::NonLink {
                     custom_id: ref cid,
                     ..
                 } = btn.data
-                {
-                    if cid == custom_id {
-                        return btn.label.clone();
-                    }
-                }
+                && cid == custom_id
+            {
+                return btn.label.clone();
             }
         }
     }

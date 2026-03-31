@@ -292,8 +292,8 @@ DISCORD_GUILD_ID=
 # Comma-separated Discord User IDs allowed to use the bot
 ALLOWED_USER_IDS=
 
-# Base directory for auto-created project folders
-BASE_PROJECT_DIR=~/projects
+# Data directory (default: ~/.rrai) — database, sessions, lock file
+# RRAI_DATA_DIR=~/.rrai
 
 # Max messages per user per minute (default: 10)
 # RATE_LIMIT_PER_MINUTE=10

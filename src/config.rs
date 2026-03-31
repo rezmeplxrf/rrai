@@ -1,5 +1,6 @@
 use once_cell::sync::OnceCell;
 use std::env;
+use std::path::PathBuf;
 
 static CONFIG: OnceCell<Config> = OnceCell::new();
 
@@ -8,11 +9,27 @@ pub struct Config {
     pub discord_bot_token: String,
     pub discord_guild_id: u64,
     pub allowed_user_ids: Vec<u64>,
-    pub base_project_dir: String,
+    /// Root data directory (~/.rrai by default)
+    pub data_dir: String,
     pub rate_limit_per_minute: u32,
 }
 
 impl Config {
+    /// Returns the sessions directory: {data_dir}/sessions
+    pub fn sessions_dir(&self) -> PathBuf {
+        PathBuf::from(&self.data_dir).join("sessions")
+    }
+
+    /// Returns the database path: {data_dir}/data.db
+    pub fn db_path(&self) -> PathBuf {
+        PathBuf::from(&self.data_dir).join("data.db")
+    }
+
+    /// Returns the lock file path: {data_dir}/.bot.lock
+    pub fn lock_path(&self) -> PathBuf {
+        PathBuf::from(&self.data_dir).join(".bot.lock")
+    }
+
     fn from_env() -> Result<Self, String> {
         let token = required_env("DISCORD_BOT_TOKEN")?;
         let guild_id = required_env("DISCORD_GUILD_ID")?
@@ -33,7 +50,13 @@ impl Config {
             return Err("ALLOWED_USER_IDS must contain at least one user ID".to_string());
         }
 
-        let base_project_dir = required_env("BASE_PROJECT_DIR")?;
+        let data_dir = env::var("RRAI_DATA_DIR").unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".rrai")
+                .to_string_lossy()
+                .to_string()
+        });
 
         let rate_limit_per_minute = env::var("RATE_LIMIT_PER_MINUTE")
             .unwrap_or_else(|_| "10".to_string())
@@ -48,7 +71,7 @@ impl Config {
             discord_bot_token: token,
             discord_guild_id: guild_id,
             allowed_user_ids,
-            base_project_dir,
+            data_dir,
             rate_limit_per_minute,
         })
     }

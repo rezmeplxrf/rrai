@@ -2,7 +2,6 @@ use super::{reply, BotData};
 use crate::db::types::SessionStatus;
 use crate::utils::channel_name::to_channel_name;
 use serenity::all::*;
-use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -90,9 +89,9 @@ pub async fn run(
         .await
         .map_err(|e| format!("Failed to create channel: {e}"))?;
 
-    // Register the project
+    // Register the project using channel_id as directory name
     let config = crate::config::get_config();
-    let project_path = Path::new(&config.base_project_dir).join(&channel_name);
+    let project_path = config.sessions_dir().join(channel.id.to_string());
     std::fs::create_dir_all(&project_path).ok();
     data.db.register_project(
         &channel.id.to_string(),

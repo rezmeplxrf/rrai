@@ -4,22 +4,19 @@ use std::process;
 use tracing::{error, info};
 
 fn lock_file_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".bot.lock")
+    rrai::config::get_config().lock_path()
 }
 
 fn acquire_lock() -> bool {
     let lock_path = lock_file_path();
-    if lock_path.exists() {
-        if let Ok(content) = fs::read_to_string(&lock_path) {
-            if let Ok(pid) = content.trim().parse::<u32>() {
-                // Check if process is still running (signal 0)
-                unsafe {
-                    if libc::kill(pid as i32, 0) == 0 {
-                        return false; // process still running
-                    }
-                }
+    if lock_path.exists()
+        && let Ok(content) = fs::read_to_string(&lock_path)
+        && let Ok(pid) = content.trim().parse::<u32>()
+    {
+        // Check if process is still running (signal 0)
+        unsafe {
+            if libc::kill(pid as i32, 0) == 0 {
+                return false; // process still running
             }
         }
         // Stale lock file
@@ -51,6 +48,22 @@ async fn main() {
     // Load .env file
     dotenvy::dotenv().ok();
 
+    info!("Starting RRAI — Rust Remote AI...");
+
+    // Load and validate config first (needed for data_dir paths)
+    if let Err(e) = rrai::config::load_config() {
+        error!("Configuration error: {e}");
+        process::exit(1);
+    }
+    let config = rrai::config::get_config();
+    info!("Config loaded (data_dir: {})", config.data_dir);
+
+    // Ensure data and sessions directories exist
+    if let Err(e) = fs::create_dir_all(config.sessions_dir()) {
+        error!("Failed to create sessions dir: {e}");
+        process::exit(1);
+    }
+
     if !acquire_lock() {
         error!("Another bot instance is already running. Exiting.");
         process::exit(1);
@@ -59,21 +72,8 @@ async fn main() {
     // #26: Release lock on SIGINT and SIGTERM
     setup_signal_handlers();
 
-    info!("Starting RRAI — Rust Remote AI...");
-
-    // Load and validate config
-    if let Err(e) = rrai::config::load_config() {
-        error!("Configuration error: {e}");
-        release_lock();
-        process::exit(1);
-    }
-    info!("Config loaded");
-
     // Initialize database
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("data.db");
-    let db = match rrai::db::Database::open(&db_path) {
+    let db = match rrai::db::Database::open(&config.db_path()) {
         Ok(db) => db,
         Err(e) => {
             error!("Database error: {e}");

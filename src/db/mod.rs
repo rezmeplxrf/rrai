@@ -38,11 +38,7 @@ impl Database {
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
-            CREATE TABLE IF NOT EXISTS workspaces (
-                guild_id TEXT PRIMARY KEY,
-                workspace_path TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
-            );",
+",
         )?;
 
         Ok(Self {
@@ -142,7 +138,7 @@ impl Database {
                     id: row.get(0)?,
                     channel_id: row.get(1)?,
                     session_id: row.get(2)?,
-                    status: SessionStatus::from_str(&row.get::<_, String>(3)?),
+                    status: SessionStatus::parse(&row.get::<_, String>(3)?),
                     last_activity: row.get(4)?,
                     created_at: row.get(5)?,
                 })
@@ -182,7 +178,7 @@ impl Database {
                     id: row.get(0)?,
                     channel_id: row.get(1)?,
                     session_id: row.get(2)?,
-                    status: SessionStatus::from_str(&row.get::<_, String>(3)?),
+                    status: SessionStatus::parse(&row.get::<_, String>(3)?),
                     last_activity: row.get(4)?,
                     created_at: row.get(5)?,
                 },

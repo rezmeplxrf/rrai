@@ -3,7 +3,6 @@ mod auto_approve;
 mod clear_sessions;
 mod config_cmd;
 mod context;
-mod force;
 mod last;
 mod mcp;
 mod model;
@@ -38,7 +37,6 @@ pub fn all_commands() -> Vec<CreateCommand> {
         config_cmd::register(),
         skills::register(),
         agents::register(),
-        force::register(),
     ]
 }
 
@@ -64,7 +62,6 @@ pub async fn handle_command(
         "config" => config_cmd::run(ctx, cmd, data).await,
         "skills" => skills::run(ctx, cmd, data).await,
         "agents" => agents::run(ctx, cmd, data).await,
-        "force" => force::run(ctx, cmd, data).await,
         _ => Ok(()),
     }
 }
@@ -74,9 +71,8 @@ pub async fn handle_autocomplete(
     auto: &CommandInteraction,
     data: &Arc<BotData>,
 ) {
-    match auto.data.name.as_str() {
-        "mcp" => mcp::autocomplete(ctx, auto, data).await,
-        _ => {}
+    if auto.data.name.as_str() == "mcp" {
+        mcp::autocomplete(ctx, auto, data).await;
     }
 }
 
@@ -100,23 +96,6 @@ pub(crate) async fn reply_embed(
     cmd.edit_response(&ctx.http, EditInteractionResponse::new().embed(embed))
         .await
         .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-pub(crate) async fn reply_with_components(
-    ctx: &Context,
-    cmd: &CommandInteraction,
-    content: &str,
-    components: Vec<CreateActionRow>,
-) -> Result<(), String> {
-    cmd.edit_response(
-        &ctx.http,
-        EditInteractionResponse::new()
-            .content(content)
-            .components(components),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

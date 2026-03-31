@@ -35,8 +35,8 @@ pub async fn run(
         .field("Guild ID", format!("`{}`", config.discord_guild_id), true)
         .field("Allowed Users", user_ids, false)
         .field(
-            "Base Project Dir",
-            format!("`{}`", config.base_project_dir),
+            "Data Dir",
+            format!("`{}`", config.data_dir),
             false,
         )
         .field(

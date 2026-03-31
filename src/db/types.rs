@@ -19,7 +19,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "online" => Self::Online,
             "waiting" => Self::Waiting,
@@ -73,7 +73,7 @@ mod tests {
             SessionStatus::Idle,
         ] {
             let s = status.as_str();
-            let parsed = SessionStatus::from_str(s);
+            let parsed = SessionStatus::parse(s);
             assert_eq!(parsed, status);
         }
     }
@@ -88,9 +88,9 @@ mod tests {
 
     #[test]
     fn session_status_unknown_defaults_to_offline() {
-        assert_eq!(SessionStatus::from_str("garbage"), SessionStatus::Offline);
-        assert_eq!(SessionStatus::from_str(""), SessionStatus::Offline);
-        assert_eq!(SessionStatus::from_str("ONLINE"), SessionStatus::Offline);
+        assert_eq!(SessionStatus::parse("garbage"), SessionStatus::Offline);
+        assert_eq!(SessionStatus::parse(""), SessionStatus::Offline);
+        assert_eq!(SessionStatus::parse("ONLINE"), SessionStatus::Offline);
     }
 
     #[test]

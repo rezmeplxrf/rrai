@@ -49,7 +49,7 @@ pub fn validate_project_path(project_path: &str) -> Option<String> {
     }
 
     let config = get_config();
-    let base_dir = Path::new(&config.base_project_dir).canonicalize().ok()?;
+    let base_dir = config.sessions_dir().canonicalize().ok()?;
     let resolved = Path::new(project_path).canonicalize().ok();
 
     match resolved {

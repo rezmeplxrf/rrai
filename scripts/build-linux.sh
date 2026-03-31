@@ -8,9 +8,9 @@ set -euo pipefail
 #   - gh CLI (authenticated) — only for publishing
 #
 # Usage:
-#   ./scripts/build-release.sh              # Build + release current version from Cargo.toml
-#   ./scripts/build-release.sh v0.2.0       # Build + release with explicit tag
-#   ./scripts/build-release.sh --build-only # Build without publishing
+#   ./scripts/build-linux.sh              # Build + release current version from Cargo.toml
+#   ./scripts/build-linux.sh v0.2.0       # Build + release with explicit tag
+#   ./scripts/build-linux.sh --build-only # Build without publishing
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

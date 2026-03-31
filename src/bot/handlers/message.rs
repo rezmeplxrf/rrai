@@ -57,25 +57,14 @@ pub async fn handle_message(
 
     let mut prompt = msg.content.trim().to_string();
 
-    // Auto-register channel if not registered
-    let project = match db.get_project(&channel_id_str) {
-        Some(p) => p,
-        None => {
-            let channel_name = msg
-                .channel_id
-                .name(&ctx.http)
-                .await
-                .unwrap_or_else(|_| channel_id_str.clone());
-            let config = get_config();
-            let project_path = Path::new(&config.base_project_dir).join(&channel_name);
-            std::fs::create_dir_all(&project_path).ok();
-            db.register_project(
-                &channel_id_str,
-                &project_path.to_string_lossy(),
-                &guild_id.to_string(),
-            );
-            db.get_project(&channel_id_str).unwrap()
-        }
+    // Resolve project path (may not be registered yet — send_message will auto-register)
+    let config = get_config();
+    let project_path = match db.get_project(&channel_id_str) {
+        Some(p) => p.project_path,
+        None => config.sessions_dir()
+            .join(&channel_id_str)
+            .to_string_lossy()
+            .to_string(),
     };
 
     // Download attachments
@@ -104,7 +93,7 @@ pub async fn handle_message(
             continue;
         }
 
-        let upload_dir = Path::new(&project.project_path).join(".claude-uploads");
+        let upload_dir = Path::new(&project_path).join(".claude-uploads");
         std::fs::create_dir_all(&upload_dir).ok();
 
         let safe_name = name.replace(['/', '\\'], "_").replace("..", "_");

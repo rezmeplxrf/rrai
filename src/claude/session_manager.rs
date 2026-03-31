@@ -36,11 +36,8 @@ struct PendingQuestion {
 
 struct ActiveSession {
     process: ClaudeProcess,
-    channel_id: ChannelId,
     session_id: Option<String>,
     db_id: String,
-    guild_id: GuildId,
-    project_path: PathBuf,
     busy: bool,
 }
 
@@ -91,10 +88,8 @@ impl SessionManager {
         let project = match self.db.get_project(&channel_id_str) {
             Some(p) => p,
             None => {
-                let channel_name = self.discord.get_channel_name(channel_id).await
-                    .unwrap_or_else(|| channel_id_str.clone());
                 let project_path =
-                    Path::new(&config.base_project_dir).join(&channel_name);
+                    config.sessions_dir().join(&channel_id_str);
                 std::fs::create_dir_all(&project_path).ok();
                 self.db.register_project(
                     &channel_id_str,
@@ -107,7 +102,7 @@ impl SessionManager {
 
         // Check if session exists; create if needed
         let session_arc = match self
-            .ensure_session(channel_id, guild_id, &project.project_path)
+            .ensure_session(channel_id, &project.project_path)
             .await
         {
             Ok(s) => s,
@@ -195,34 +190,34 @@ impl SessionManager {
                     session_id,
                     ..
                 } => {
-                    if subtype == "init" {
-                        if let Some(sid) = session_id {
-                            let mut session = session_arc.lock().await;
-                            session.session_id = Some(sid.clone());
-                            self.db.upsert_session(
-                                &session.db_id,
-                                &channel_id_str,
-                                Some(&sid),
-                                SessionStatus::Idle,
-                            );
+                    if subtype == "init"
+                        && let Some(sid) = session_id
+                    {
+                        let mut session = session_arc.lock().await;
+                        session.session_id = Some(sid.clone());
+                        self.db.upsert_session(
+                            &session.db_id,
+                            &channel_id_str,
+                            Some(&sid),
+                            SessionStatus::Idle,
+                        );
 
-                            // Apply per-channel disabled MCPs
-                            let disabled = self.db.get_disabled_mcps(&channel_id_str);
-                            for name in disabled {
-                                let mut params = HashMap::new();
-                                params.insert(
-                                    "server_name".to_string(),
-                                    serde_json::Value::String(name),
-                                );
-                                params.insert(
-                                    "enabled".to_string(),
-                                    serde_json::Value::Bool(false),
-                                );
-                                let _ = session
-                                    .process
-                                    .send_control("toggle_mcp_server", params)
-                                    .await;
-                            }
+                        // Apply per-channel disabled MCPs
+                        let disabled = self.db.get_disabled_mcps(&channel_id_str);
+                        for name in disabled {
+                            let mut params = HashMap::new();
+                            params.insert(
+                                "server_name".to_string(),
+                                serde_json::Value::String(name),
+                            );
+                            params.insert(
+                                "enabled".to_string(),
+                                serde_json::Value::Bool(false),
+                            );
+                            let _ = session
+                                .process
+                                .send_control("toggle_mcp_server", params)
+                                .await;
                         }
                     }
                 }
@@ -478,7 +473,6 @@ impl SessionManager {
     async fn ensure_session(
         &self,
         channel_id: ChannelId,
-        guild_id: GuildId,
         project_path: &str,
     ) -> Result<Arc<tokio::sync::Mutex<ActiveSession>>, String> {
         let channel_id_str = channel_id.to_string();
@@ -520,11 +514,8 @@ impl SessionManager {
 
         let session = ActiveSession {
             process,
-            channel_id,
             session_id: resume_session_id,
             db_id: db_id.clone(),
-            guild_id,
-            project_path: project_path_buf,
             busy: false,
         };
 
@@ -626,15 +617,15 @@ impl SessionManager {
 
         // Auto-approve read-only tools
         let read_only = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite"];
-        if read_only.iter().any(|t| *t == tool_name) {
+        if read_only.contains(&tool_name) {
             return ("allow".into(), None, None);
         }
 
         // Check auto-approve setting
-        if let Some(project) = self.db.get_project(channel_id_str) {
-            if project.auto_approve {
-                return ("allow".into(), None, None);
-            }
+        if let Some(project) = self.db.get_project(channel_id_str)
+            && project.auto_approve
+        {
+            return ("allow".into(), None, None);
         }
 
         // Ask user via Discord buttons

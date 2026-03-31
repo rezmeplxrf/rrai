@@ -117,10 +117,10 @@ pub fn create_tool_approval_embed(
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             embed = embed.field("Command", format!("```bash\n{command}\n```"), false);
-            if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
-                if !desc.is_empty() {
-                    embed = embed.field("Description", desc, false);
-                }
+            if let Some(desc) = input.get("description").and_then(|v| v.as_str())
+                && !desc.is_empty()
+            {
+                embed = embed.field("Description", desc, false);
             }
         }
         _ => {

@@ -129,13 +129,30 @@ Discord Channel
 
 Each channel's Claude process runs with `cwd` set to `~/.rrai/sessions/{channel_id}`, giving full filesystem isolation between sessions.
 
-## Build & Run
+## Required Discord Permissions
 
-```bash
-cargo build --release
-./target/release/rrai
-```
+### Gateway Intents
 
-## License
+| Intent | Privileged | Why |
+|---|---|---|
+| `GUILDS` | No | Receive guild events, channel lookups, orphan cleanup |
+| `GUILD_MESSAGES` | No | Receive messages to forward to Claude sessions |
+| `MESSAGE_CONTENT` | Yes | Read message text (required for non-slash-command input) |
 
-MIT
+### Bot Permissions
+
+| Permission | Used By |
+|---|---|
+| Send Messages | All responses, streaming output, embeds, approval UI |
+| Manage Messages | `/clear` bulk message deletion |
+| Manage Channels | `/start-new` channel creation |
+| Read Message History | `/clear` message fetching, attachment downloads |
+| Embed Links | Result embeds, tool approval embeds, status displays |
+| Attach Files | File outputs from Claude sessions |
+| Add Reactions | Message receipt confirmation |
+| View Channels | All channel operations (implicit) |
+
+### Setup
+
+1. Enable **Message Content Intent** in the Discord Developer Portal under Bot settings
+2. Generate an invite URL with the bot permissions above (integer: `126032`)

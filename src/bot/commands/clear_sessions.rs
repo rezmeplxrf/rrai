@@ -101,12 +101,17 @@ async fn bulk_delete_channel_messages(
         }
 
         let batch_count = message_ids.len();
-        if batch_count == 1 {
-            let _ = channel_id.delete_message(&ctx.http, message_ids[0]).await;
+        let delete_ok = if batch_count == 1 {
+            channel_id.delete_message(&ctx.http, message_ids[0]).await.is_ok()
         } else {
-            let _ = channel_id
+            channel_id
                 .delete_messages(&ctx.http, &message_ids)
-                .await;
+                .await
+                .is_ok()
+        };
+
+        if !delete_ok {
+            break;
         }
 
         total_deleted += batch_count;

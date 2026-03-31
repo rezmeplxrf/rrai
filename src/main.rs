@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 use tracing::{error, info};
@@ -9,19 +10,34 @@ fn lock_file_path() -> PathBuf {
 
 fn acquire_lock() -> bool {
     let lock_path = lock_file_path();
-    if lock_path.exists()
-        && let Ok(content) = fs::read_to_string(&lock_path)
-        && let Ok(pid) = content.trim().parse::<u32>()
-    {
-        // Check if process is still running (signal 0)
-        unsafe {
-            if libc::kill(pid as i32, 0) == 0 {
+
+    // Check for stale lock from a dead process
+    if lock_path.exists() {
+        if let Ok(content) = fs::read_to_string(&lock_path)
+            && let Ok(pid) = content.trim().parse::<u32>()
+        {
+            // Check if process is still running (signal 0)
+            let alive = unsafe { libc::kill(pid as i32, 0) == 0 };
+            if alive {
                 return false; // process still running
             }
         }
-        // Stale lock file
+        // Stale lock — remove it before attempting atomic create
+        let _ = fs::remove_file(&lock_path);
     }
-    fs::write(&lock_path, process::id().to_string()).is_ok()
+
+    // Atomic create: O_CREAT | O_EXCL ensures only one process wins
+    let result = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path);
+    match result {
+        Ok(mut f) => {
+            let _ = f.write_all(process::id().to_string().as_bytes());
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 fn release_lock() {

@@ -995,7 +995,7 @@ impl SessionManager {
 
         let remaining = self.get_queue_size(channel_id);
         let preview = if next.prompt.len() > 40 {
-            format!("{}…", &next.prompt[..40])
+            format!("{}…", truncate(&next.prompt, 40))
         } else {
             next.prompt.clone()
         };

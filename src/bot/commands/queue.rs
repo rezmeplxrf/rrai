@@ -57,7 +57,7 @@ pub async fn run(
                 .enumerate()
                 .map(|(idx, p)| {
                     let preview = if p.len() > 100 {
-                        format!("{}…", &p[..100])
+                        format!("{}…", crate::claude::output_formatter::truncate(p, 100))
                     } else {
                         p.clone()
                     };

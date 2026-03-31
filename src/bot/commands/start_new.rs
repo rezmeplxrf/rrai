@@ -63,7 +63,7 @@ pub async fn run(
         None => {
             let slug = to_channel_name(&message);
             if slug.len() > 30 {
-                slug[..30].trim_end_matches('-').to_string()
+                crate::claude::output_formatter::truncate(&slug, 30).trim_end_matches('-').to_string()
             } else {
                 slug
             }

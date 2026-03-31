@@ -51,7 +51,8 @@ impl Database {
     pub fn register_project(&self, channel_id: &str, project_path: &str, guild_id: &str) {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO projects (channel_id, project_path, guild_id) VALUES (?1, ?2, ?3)",
+            "INSERT INTO projects (channel_id, project_path, guild_id) VALUES (?1, ?2, ?3)
+             ON CONFLICT(channel_id) DO UPDATE SET project_path = ?2, guild_id = ?3",
             params![channel_id, project_path, guild_id],
         )
         .ok();

@@ -9,7 +9,7 @@ pub fn format_stream_chunk(text: &str) -> String {
     if text.len() <= MAX_DISCORD_LENGTH {
         text.to_string()
     } else {
-        format!("{}\n... (truncated)", &text[..MAX_DISCORD_LENGTH])
+        format!("{}\n... (truncated)", truncate(text, MAX_DISCORD_LENGTH))
     }
 }
 
@@ -23,11 +23,17 @@ pub fn split_message(text: &str) -> Vec<String> {
             break;
         }
 
+        // Find a valid char boundary for the split limit
+        let mut limit = MAX_DISCORD_LENGTH;
+        while !remaining.is_char_boundary(limit) && limit > 0 {
+            limit -= 1;
+        }
+
         // Try to split at a newline
-        let search_range = &remaining[..MAX_DISCORD_LENGTH];
+        let search_range = &remaining[..limit];
         let split_at = match search_range.rfind('\n') {
-            Some(pos) if pos >= MAX_DISCORD_LENGTH / 2 => pos,
-            _ => MAX_DISCORD_LENGTH,
+            Some(pos) if pos >= limit / 2 => pos,
+            _ => limit,
         };
 
         let mut chunk = remaining[..split_at].to_string();
@@ -293,7 +299,7 @@ pub fn create_result_embed(
     let description = if needs_file {
         format!(
             "{}\n\n... Full result attached as file",
-            &result[..3900.min(result.len())]
+            truncate(result, 3900)
         )
     } else {
         result.to_string()
@@ -315,7 +321,7 @@ pub fn create_result_embed(
     (embed, file)
 }
 
-fn truncate(s: &str, max: usize) -> &str {
+pub fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s
     } else {

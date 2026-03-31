@@ -87,7 +87,7 @@ pub async fn run(
             .as_deref()
             .unwrap_or("(no message)");
         let label = if msg_preview.len() > 50 {
-            format!("{}...", &msg_preview[..47])
+            format!("{}...", crate::claude::output_formatter::truncate(msg_preview, 47))
         } else {
             msg_preview.to_string()
         };

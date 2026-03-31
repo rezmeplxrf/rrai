@@ -49,7 +49,10 @@ pub fn validate_project_path(project_path: &str) -> Option<String> {
     }
 
     let config = get_config();
-    let base_dir = config.sessions_dir().canonicalize().ok()?;
+    let base_dir = match config.sessions_dir().canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Some("Sessions directory does not exist".to_string()),
+    };
     let resolved = Path::new(project_path).canonicalize().ok();
 
     match resolved {

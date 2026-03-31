@@ -14,13 +14,7 @@ pub async fn run(
 ) -> Result<(), String> {
     let config = get_config();
 
-    // Masked token preview (first 20 + last 4)
-    let token = &config.discord_bot_token;
-    let token_preview = if token.len() > 24 {
-        format!("{}...{}", &token[..20], &token[token.len() - 4..])
-    } else {
-        "***".to_string()
-    };
+    let token_preview = format!("{}***", &config.discord_bot_token[..4.min(config.discord_bot_token.len())]);
 
     let user_ids: String = config
         .allowed_user_ids

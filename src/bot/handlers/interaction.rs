@@ -296,7 +296,7 @@ pub async fn handle_button_interaction(
 
             if let Some(removed_prompt) = removed {
                 let preview = if removed_prompt.len() > 60 {
-                    format!("{}…", &removed_prompt[..60])
+                    format!("{}…", crate::claude::output_formatter::truncate(&removed_prompt, 60))
                 } else {
                     removed_prompt.clone()
                 };
@@ -323,7 +323,7 @@ pub async fn handle_button_interaction(
                         .enumerate()
                         .map(|(idx, p)| {
                             let p_preview = if p.len() > 100 {
-                                format!("{}…", &p[..100])
+                                format!("{}…", crate::claude::output_formatter::truncate(p, 100))
                             } else {
                                 p.clone()
                             };
@@ -551,7 +551,7 @@ pub async fn handle_select_menu_interaction(
 
         let preview = if !last_message.is_empty() && last_message != "(no message)" {
             let truncated = if last_message.len() > 300 {
-                format!("{}...", &last_message[..300])
+                format!("{}...", crate::claude::output_formatter::truncate(&last_message, 300))
             } else {
                 last_message
             };

@@ -56,6 +56,21 @@ impl EventHandler for Handler {
                 crate::security::cleanup_rate_limits();
             }
         });
+
+        // Periodic bot presence update based on session statuses
+        let presence_db = self.data.db.clone();
+        let presence_ctx = ctx.clone();
+        tokio::spawn(async move {
+            loop {
+                update_bot_presence(&presence_ctx, &presence_db).await;
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            }
+        });
+
+        // Log status channel if configured
+        if let Some(ch) = config.status_channel_id {
+            info!("Status notifications enabled → channel {ch}");
+        }
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
@@ -128,6 +143,32 @@ impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
         message::handle_message(&ctx, &msg, &self.data.db, &self.data.session_manager).await;
     }
+}
+
+async fn update_bot_presence(ctx: &Context, db: &Database) {
+    let (online, waiting, idle) = db.get_session_status_counts();
+    let total_active = online + waiting;
+
+    let (status, activity_text) = if waiting > 0 && online > 0 {
+        (OnlineStatus::Online, format!("{online} working, {waiting} waiting"))
+    } else if waiting > 0 {
+        (OnlineStatus::Idle, format!("{waiting} waiting for approval"))
+    } else if online > 0 {
+        let label = if online == 1 { "session" } else { "sessions" };
+        (OnlineStatus::Online, format!("{online} {label} active"))
+    } else if idle > 0 {
+        (OnlineStatus::Idle, format!("{idle} idle"))
+    } else {
+        (OnlineStatus::Idle, "No active sessions".to_string())
+    };
+
+    let activity = if total_active > 0 {
+        ActivityData::custom(&activity_text)
+    } else {
+        ActivityData::watching(&activity_text)
+    };
+
+    ctx.set_presence(Some(activity), status);
 }
 
 async fn cleanup_orphaned_projects(db: &Database, http: &Http, guild_id: GuildId) {

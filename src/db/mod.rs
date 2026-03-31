@@ -231,6 +231,31 @@ impl Database {
         }
     }
 
+    /// Returns (online, waiting, idle) counts across all sessions.
+    pub fn get_session_status_counts(&self) -> (u32, u32, u32) {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT status, COUNT(*) FROM sessions GROUP BY status")
+            .unwrap();
+        let mut online = 0u32;
+        let mut waiting = 0u32;
+        let mut idle = 0u32;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+            })
+            .unwrap();
+        for row in rows.flatten() {
+            match row.0.as_str() {
+                "online" => online = row.1,
+                "waiting" => waiting = row.1,
+                "idle" => idle = row.1,
+                _ => {}
+            }
+        }
+        (online, waiting, idle)
+    }
+
     pub fn set_disabled_mcps(&self, channel_id: &str, names: &[String]) {
         let conn = self.conn.lock();
         let val = if names.is_empty() {

@@ -6,7 +6,7 @@ use crate::db::Database;
 use crate::discord::DiscordClient;
 use parking_lot::Mutex;
 use serenity::all::{
-    ChannelId, CreateAttachment, CreateMessage, EditMessage, GuildId,
+    ChannelId, CreateAttachment, CreateEmbed, CreateMessage, EditMessage, GuildId,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -140,8 +140,7 @@ impl SessionManager {
             session.process.send_message(prompt).await?;
         }
 
-        self.db
-            .update_session_status(&channel_id_str, SessionStatus::Online);
+        self.update_status(&channel_id_str, SessionStatus::Online);
 
         // Process messages from the Claude process
         let mut response_buffer = String::new();
@@ -401,8 +400,7 @@ impl SessionManager {
                         let mut session = session_arc.lock().await;
                         session.busy = false;
                     }
-                    self.db
-                        .update_session_status(&channel_id_str, SessionStatus::Idle);
+                    self.update_status(&channel_id_str, SessionStatus::Idle);
 
                     // #1: Process next queued message (actually calls send_message)
                     self.process_queue(&channel_id_str).await;
@@ -464,8 +462,7 @@ impl SessionManager {
             .send_message(channel_id, CreateMessage::new().content(format!("❌ {err_msg}")))
             .await;
 
-        self.db
-            .update_session_status(channel_id_str, SessionStatus::Offline);
+        self.update_status(channel_id_str, SessionStatus::Offline);
         self.sessions.write().await.remove(channel_id_str);
         self.cleanup_pending(channel_id_str);
     }
@@ -630,8 +627,7 @@ impl SessionManager {
 
         // Ask user via Discord buttons
         let (embed, row) = create_tool_approval_embed(tool_name, input, request_id);
-        self.db
-            .update_session_status(channel_id_str, SessionStatus::Waiting);
+        self.update_status(channel_id_str, SessionStatus::Waiting);
         let _ = self.discord
             .send_message(
                 channel_id,
@@ -658,8 +654,7 @@ impl SessionManager {
         )
         .await;
 
-        self.db
-            .update_session_status(channel_id_str, SessionStatus::Online);
+        self.update_status(channel_id_str, SessionStatus::Online);
 
         match result {
             Ok(Ok(decision)) => decision,
@@ -700,8 +695,7 @@ impl SessionManager {
                 questions.len(),
             );
 
-            self.db
-                .update_session_status(channel_id_str, SessionStatus::Waiting);
+            self.update_status(channel_id_str, SessionStatus::Waiting);
             let _ = self.discord
                 .send_message(
                     channel_id,
@@ -736,15 +730,13 @@ impl SessionManager {
                 }
                 _ => {
                     self.pending_questions.lock().remove(&q_request_id);
-                    self.db
-                        .update_session_status(channel_id_str, SessionStatus::Online);
+                    self.update_status(channel_id_str, SessionStatus::Online);
                     return ("deny".into(), Some("Question timed out".into()), None);
                 }
             }
         }
 
-        self.db
-            .update_session_status(channel_id_str, SessionStatus::Online);
+        self.update_status(channel_id_str, SessionStatus::Online);
 
         let mut updated_input = input.clone();
         if let Some(obj) = updated_input.as_object_mut() {
@@ -853,8 +845,7 @@ impl SessionManager {
             let mut session = session_arc.lock().await;
             session.process.close().await;
             self.cleanup_pending(channel_id);
-            self.db
-                .update_session_status(channel_id, SessionStatus::Offline);
+            self.update_status(channel_id, SessionStatus::Offline);
             true
         } else {
             false
@@ -887,6 +878,58 @@ impl SessionManager {
     async fn cleanup_session_internal(&self, channel_id: &str) {
         self.sessions.write().await.remove(channel_id);
         self.cleanup_pending(channel_id);
+    }
+
+    /// Update session status in DB and broadcast to status channel if configured.
+    fn update_status(&self, channel_id: &str, status: SessionStatus) {
+        let old = self
+            .db
+            .get_session(channel_id)
+            .map(|s| s.status)
+            .unwrap_or(SessionStatus::Offline);
+        self.db.update_session_status(channel_id, status);
+        if old != status {
+            self.notify_status_change(channel_id, old, status);
+        }
+    }
+
+    /// Send a status change embed to the configured status channel.
+    fn notify_status_change(
+        &self,
+        channel_id: &str,
+        old: SessionStatus,
+        new: SessionStatus,
+    ) {
+        let config = get_config();
+        let status_ch = match config.status_channel_id {
+            Some(id) => ChannelId::new(id),
+            None => return,
+        };
+
+        let (icon, color) = match new {
+            SessionStatus::Online => ("🟢", 0x57f287),
+            SessionStatus::Waiting => ("🟡", 0xfee75c),
+            SessionStatus::Idle => ("⚪", 0x99aab5),
+            SessionStatus::Offline => ("🔴", 0xed4245),
+        };
+
+        let ch_id: u64 = channel_id.parse().unwrap_or(0);
+        let embed = CreateEmbed::new()
+            .title(format!("{icon} Session {}", new.as_str()))
+            .description(format!(
+                "<#{ch_id}> — **{}** → **{}**",
+                old.as_str(),
+                new.as_str()
+            ))
+            .color(color)
+            .timestamp(serenity::all::Timestamp::now());
+
+        let discord = self.discord.clone();
+        tokio::spawn(async move {
+            let _ = discord
+                .send_message(status_ch, CreateMessage::new().embed(embed))
+                .await;
+        });
     }
 
     // --- Message queue ---

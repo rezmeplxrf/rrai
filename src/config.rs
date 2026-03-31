@@ -12,6 +12,8 @@ pub struct Config {
     /// Root data directory (~/.rrai by default)
     pub data_dir: String,
     pub rate_limit_per_minute: u32,
+    /// Optional channel ID for broadcasting status changes
+    pub status_channel_id: Option<u64>,
 }
 
 impl Config {
@@ -67,12 +69,17 @@ impl Config {
             return Err("RATE_LIMIT_PER_MINUTE must be greater than 0".to_string());
         }
 
+        let status_channel_id = env::var("STATUS_CHANNEL_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok());
+
         Ok(Config {
             discord_bot_token: token,
             discord_guild_id: guild_id,
             allowed_user_ids,
             data_dir,
             rate_limit_per_minute,
+            status_channel_id,
         })
     }
 }

@@ -10,7 +10,6 @@ pub struct Config {
     pub allowed_user_ids: Vec<u64>,
     pub base_project_dir: String,
     pub rate_limit_per_minute: u32,
-    pub show_cost: bool,
 }
 
 impl Config {
@@ -41,18 +40,12 @@ impl Config {
             .parse::<u32>()
             .map_err(|_| "RATE_LIMIT_PER_MINUTE must be a positive integer".to_string())?;
 
-        let show_cost = env::var("SHOW_COST")
-            .unwrap_or_else(|_| "true".to_string())
-            .to_lowercase()
-            == "true";
-
         Ok(Config {
             discord_bot_token: token,
             discord_guild_id: guild_id,
             allowed_user_ids,
             base_project_dir,
             rate_limit_per_minute,
-            show_cost,
         })
     }
 }

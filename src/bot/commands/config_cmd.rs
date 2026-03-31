@@ -44,11 +44,6 @@ pub async fn run(
             format!("{}/min", config.rate_limit_per_minute),
             true,
         )
-        .field(
-            "Show Cost",
-            if config.show_cost { "Yes" } else { "No" },
-            true,
-        )
         .color(0x5865f2)
         .timestamp(Timestamp::now());
 

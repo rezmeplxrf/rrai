@@ -368,14 +368,13 @@ impl SessionManager {
                         )
                         .await;
 
-                    // Send result embed (#23: pass cost + show_cost)
                     let result_text = result.as_deref().unwrap_or("Task completed");
                     let (embed, file_data) = create_result_embed(
                         result_text,
                         usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
                         usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
                         duration_ms.unwrap_or(0),
-                        if get_config().show_cost { total_cost_usd } else { None },
+                        total_cost_usd,
                     );
                     let mut create_msg = CreateMessage::new().embed(embed);
                     if let Some(data) = file_data {
